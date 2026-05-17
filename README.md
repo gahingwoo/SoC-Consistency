@@ -28,13 +28,16 @@ $ socc check board.dts --soc rk3588
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Commands](#commands)
-  - [Core analysis](#core-analysis)
-  - [Precision diagnostics](#precision-diagnostics)
-  - [Hardware comparison](#hardware-comparison)
-  - [Design assistance](#design-assistance)
-  - [Vendor BSP tools](#vendor-bsp-tools)
+  - [Top-level](#top-level)
+  - [socc audit — compatibility & BOM](#socc-audit--compatibility--bom)
+  - [socc analyze — static analysis](#socc-analyze--static-analysis)
+  - [socc generate — artifacts](#socc-generate--artifacts)
+  - [socc viz — visualization](#socc-viz--visualization)
+  - [socc sim — simulation & live-board](#socc-sim--simulation--live-board)
+  - [socc socdef — constraint files](#socc-socdef--constraint-files)
 - [Supported SoCs](#supported-socs)
 - [CI / CD integration](#ci--cd-integration)
+- [Upgrading from pre-1.1](#upgrading-from-pre-11)
 - [Rules reference](#rules-reference)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
@@ -97,42 +100,52 @@ socc check board.dts --soc rk3588
 # Auto-fix safe violations and write a patch
 socc fix board.dts --soc rk3588 -o board.patch
 
-# Semantic diff between two DTS / DTB files (ignores labels and phandles)
+# Semantic diff between two DTS / DTB files
 socc smart-diff vendor.dts mainline.dts
 
-# Find zombie nodes (disabled + unreferenced) in a vendor BSP
-socc gc rockchip-rk3588-evb.dts
+# ── analyze group ──────────────────────────────────────────────────────────
+socc analyze gc board.dts --soc rk3588          # zombie-node garbage collector
+socc analyze memory board.dts                   # MMIO overlap scan
+socc analyze bounds board.dts --soc rk3588      # GPIO/DMA/PWM out-of-bounds
+socc analyze irq board.dts                      # IRQ collision check
+socc analyze deps board.dts                     # power/clock cycle detection
 
-# Detect MMIO region overlaps
-socc check-memory board.dts
+# ── audit group ────────────────────────────────────────────────────────────
+socc audit bindings board.dts                   # DTS binding audit
+socc audit bom board.dts hardware.csv           # BOM cross-check
+socc audit kernel board.dts --kernel /path/to/kernel  # kernel config audit
 
-# Detect copy-paste GPIO/DMA/PWM out-of-bounds errors
-socc check-bounds board.dts --soc rk3588
+# ── viz group ─────────────────────────────────────────────────────────────
+socc viz topology board.dts --soc rk3588        # HTML topology graph
+socc viz pinmap rk3588                          # BGA pin heatmap
+socc viz power-seq board.dts                    # power-rail sequencing chart
 
-# Detect IRQ collisions and reserved-PPI misuse
-socc check-irq board.dts
-
-# Detect power/clock dependency cycles
-socc check-deps board.dts
-
-# Interactive shell with SoC model loaded
-socc shell board.dts --soc rk3588
+# ── sim group ─────────────────────────────────────────────────────────────
+socc sim failure vcc_3v3 board.dts --soc rk3588 # FMEA blast radius
+socc sim shell board.dts --soc rk3588           # interactive simulator
+socc sim live-check board.dts --host 192.168.1.1 # live-board SSH audit
 ```
 
 ---
 
 ## Commands
 
-### Core analysis
+### Top-level
 
 | Command | Description |
 |---------|-------------|
-| `socc check` | Run all registered rules; output violations by severity |
+| `socc check` | Run all rules — output violations by severity |
 | `socc fix` | Auto-generate a DTS patch for safe-to-fix violations |
-| `socc rules` | List all enabled rules with descriptions |
-| `socc shell` | Drop into an interactive Python shell with the SoC model |
+| `socc autofix` | Apply fixes in-place |
+| `socc diff` | Show violations introduced between two DTS versions |
+| `socc smart-diff` | Semantic DTS/DTB diff (ignores labels/phandles/ordering) |
+| `socc explain` | Explain a rule code in plain English with fix examples |
+| `socc rules` | List all enabled rules with IDs and descriptions |
+| `socc init` | Create a `.socc.yaml` config scaffold |
+| `socc version` | Print version and environment information |
+| `socc self-update` | Upgrade to the latest release from PyPI |
 
-#### `socc check`
+#### `socc check` options
 
 ```bash
 socc check board.dts --soc rk3588 \
@@ -141,183 +154,179 @@ socc check board.dts --soc rk3588 \
      -o report.json
 ```
 
-Options:
-- `--soc` — Target SoC name for hardware-specific rules (e.g. `rk3588`, `rk3568`, `sun50i-h616`)
-- `--min-severity` — Filter threshold: `info` | `warning` | `error` | `fatal`
-- `--format` — Output format: `text` (default) | `json` | `html`
-- `--netlist` — Cross-check against a KiCad or CSV netlist file
-- `--enable` / `--disable` — Enable or disable specific rule codes
-- `-o` — Write output to file instead of stdout
+| Option | Description |
+|--------|-------------|
+| `--soc` | Target SoC (`rk3588`, `sun50i-h616`, `imx8mp`, …) |
+| `--min-severity` | Filter: `info` \| `warning` \| `error` \| `fatal` |
+| `--format` | Output: `text` (default) \| `json` \| `html` \| `sarif` |
+| `--netlist` | Cross-check against a KiCad or CSV netlist |
+| `--enable` / `--disable` | Toggle specific rule codes |
+| `-o` | Write output to file |
 
 ---
 
-### Precision diagnostics
+### socc audit — compatibility & BOM
 
-These commands address the most common hardware bugs caused by vendor BSPs
-and copy-paste errors.
+```
+socc audit COMMAND [OPTIONS] ...
+```
 
-#### `socc gc` — DTS Zombie-Node Garbage Collector
+| Subcommand | Old flat name | Description |
+|------------|--------------|-------------|
+| `socc audit bindings` | `socc audit` | DTS binding audit against mainline kernel |
+| `socc audit bom` | `socc audit-bom` | Cross-check BOM CSV against DTS peripherals |
+| `socc audit kernel` | `socc audit-kernel` | Validate DTS-enabled devices against kernel config |
+| `socc audit amp` | `socc amp-audit` | AMP (Linux + RTOS) resource conflict detection |
+| `socc audit matrix` | `socc matrix-audit` | Multi-SKU supply-chain variant matrix audit |
+| `socc audit cross-check` | `socc cross-check` | Bootloader vs. kernel DTS skew detection |
+| `socc audit overlay` | `socc overlay-check` | Validate a DT overlay against its base DTS |
+| `socc audit netlist` | `socc crosscheck` | Cross-validate DTS pinctrl against PCB netlist |
 
-Vendor BSPs ship Device Trees that support dozens of board variants.  Your
-production board probably activates only a fraction of those nodes.  The rest
-are disabled dead-code that bloats the compiled DTB and slows kernel parsing.
+---
+
+### socc analyze — static analysis
+
+```
+socc analyze COMMAND [OPTIONS] DTS_FILE
+```
+
+| Subcommand | Old flat name | Description |
+|------------|--------------|-------------|
+| `socc analyze memory` | `socc check-memory` | Sweep-line MMIO overlap scanner |
+| `socc analyze deps` | `socc check-deps` | Power/clock dependency cycle detector |
+| `socc analyze bounds` | `socc check-bounds` | GPIO/DMA/PWM physical-bounds auditor |
+| `socc analyze irq` | `socc check-irq` | IRQ collision and reserved-PPI checker |
+| `socc analyze gc` | `socc gc` | Zombie-node garbage collector |
+
+#### socc analyze gc
+
+Vendor BSPs ship Device Trees with dozens of disabled nodes for unsupported
+board variants.  `gc` identifies unreferenced dead-code nodes and estimates
+DTB savings.
 
 ```bash
-socc gc rockchip-rk3588-evb.dts
+socc analyze gc rockchip-rk3588-evb.dts
 ```
 
 ```text
-──────────────────────────────────────────────────────────
 SOCC DTS ZOMBIE-NODE GARBAGE COLLECTOR
-──────────────────────────────────────────────────────────
   Alive nodes   : 47
   Zombie nodes  : 14
   Est. DTB savings: 8732 bytes (~8.5 KiB)
-
-[CLEANUP] Found 14 unreferenced zombie nodes!
-  • /soc/i2c@fe2c0000/camera-sensor@36
-    Status: disabled  refs: 0  ~128 bytes
-  • /soc/pcie@fe160000
-    Status: disabled  refs: 0  ~96 bytes
-  ...
-  Run: socc gc --apply board.dts  to strip them from the source.
 ```
 
-#### `socc check-bounds` — Physical Hardware Bounds Auditor
+#### socc analyze bounds
 
-Catches the classic copy-paste bug: changing a GPIO pin index to a value
-that exceeds the physical bank size, which compiles fine but panics at probe.
+Catches copy-paste GPIO/DMA/PWM index errors that compile fine but panic at
+driver probe:
 
 ```bash
-socc check-bounds board.dts --soc rk3588
+socc analyze bounds board.dts --soc rk3588
 ```
 
 ```text
 [FATAL] BND-001  /leds/user-led1
-    Property  : gpios = ['&gpio4', 35, 0]
-    Pin index 35 is out of range for gpio4 (valid: 0-31)
-    Hint: gpio4 only has 32 pins (indices 0-31). Check schematic.
+    gpios = ['&gpio4', 35, 0]  — pin 35 is out of range for gpio4 (max: 31)
 ```
 
-Checks GPIO pin indices (`BND-001`), DMA channel numbers (`BND-002`),
-and PWM channel indices (`BND-003`) against the SoC hardware database.
+#### socc analyze irq
 
-#### `socc check-irq` — IRQ Collision & Routing Checker
-
-Detects the hardest-to-debug class of runtime failures: two active devices
-sharing the same GIC SPI interrupt line, or a device driver bound to an
-architecturally reserved PPI.
+Detects two active devices sharing the same non-shared GIC SPI line:
 
 ```bash
-socc check-irq board.dts
+socc analyze irq board.dts
 ```
 
 ```text
-[CRITICAL] IRQ-C01  GIC SPI IRQ 45
-    Non-shared interrupt GIC SPI IRQ 45 claimed by 2 active nodes simultaneously.
-    • spi0   -> /soc/spi@fe610000
-    • uart0  -> /soc/uart@fe660000
-    Hint: Assign unique interrupt lines to each peripheral, or enable IRQF_SHARED.
+[CRITICAL] IRQ-C01  GIC SPI IRQ 45 claimed by spi0 and uart0 simultaneously.
 ```
 
-| Rule | Description |
-|------|-------------|
-| `IRQ-C01` | Two active nodes share the same non-shared interrupt line |
-| `IRQ-C02` | Device driver bound to architecturally reserved PPI (SGI/FIQ/timer) |
-| `IRQ-C03` | `interrupt-parent` points to missing or disabled controller |
-| `IRQ-C04` | Interrupt controller missing `#interrupt-cells` property |
+#### socc analyze memory
 
-#### `socc check-memory` — MMIO Overlap Scanner
-
-Sweep-line O(n log n) algorithm detects every class of `reg` address-space
-collision that causes silent memory corruption at `ioremap()` time.
-
-```bash
-socc check-memory board.dts
-```
+O(n log n) sweep-line detects every class of `reg` address-space collision:
 
 | Rule | Description |
 |------|-------------|
 | `MM-001` | Identical window — duplicate node |
 | `MM-002` | Full containment — one region inside another |
-| `MM-003` | Partial overlap — ioremap will corrupt both drivers |
-| `MM-004` | Zero-size region — driver cannot map registers |
+| `MM-003` | Partial overlap — silent memory corruption |
+| `MM-004` | Zero-size region |
 | `MM-005` | Suspiciously large region (> 512 MiB) |
 
-#### `socc check-deps` — Power/Clock Dependency Analyzer
+#### socc analyze deps
 
-Builds directed graphs of the power tree and clock tree, then runs DFS cycle
-detection and orphan-supply checks.
-
-```bash
-socc check-deps board.dts --fan-out-limit 8
-```
+Builds directed power/clock graphs and runs DFS cycle detection:
 
 | Rule | Description |
 |------|-------------|
-| `DG-CP01` | Cycle in power dependency graph — kernel will deadlock at boot |
+| `DG-CP01` | Cycle in power dependency graph — kernel deadlock at boot |
 | `DG-CK01` | Cycle in clock dependency graph |
-| `DG-OP01` | Regulator references a parent rail that does not exist |
-| `DG-OK01` | Clock references a parent that does not exist |
-| `DG-FP01` | Single power rail drives an unusually high number of consumers |
+| `DG-OP01` | Regulator references non-existent parent rail |
+| `DG-OK01` | Clock references non-existent parent |
 
 ---
 
-### Hardware comparison
+### socc generate — artifacts
 
-#### `socc smart-diff` — Semantic DTS/DTB Diff
-
-Compares two DTS or DTB files at the hardware-content level, ignoring node
-labels, phandle values, comments, and node ordering.  Produces human-readable
-annotations for common property semantics.
-
-```bash
-socc smart-diff vendor.dtb mainline.dts --format markdown -o diff.md
+```
+socc generate COMMAND [OPTIONS] DTS_FILE
 ```
 
-```text
-CHANGED  /soc/pcie@fe150000 : max-link-speed  2 → 3  [PCIe Gen2 → Gen3]
-CHANGED  /soc/i2c@fe2b0000  : clock-frequency  400000 → 100000  [400 kHz → 100 kHz]
-ADDED    /soc/extra@ff000000
-REMOVED  /soc/gpu@fe280000
-```
-
-Formats: `text` (default), `markdown`, `json`.
-
-#### `socc cross-check` — Bootloader vs. Kernel DTS Comparison
-
-Detects configuration skew between the bootloader DTS and the kernel DTS —
-the root cause of "works in U-Boot, hangs in Linux" failures.
-
-```bash
-socc cross-check uboot.dts kernel.dts --soc rk3588
-```
+| Subcommand | Old flat name | Description |
+|------------|--------------|-------------|
+| `socc generate qemu` | `socc generate-qemu` | QEMU launch script or C machine skeleton |
+| `socc generate tests` | `socc generate-tests` | Bash bring-up test script |
+| `socc generate saleae` | `socc generate-saleae` | Saleae Logic 2 workspace JSON |
+| `socc generate headers` | `socc export-headers` | Bare-metal C peripheral address header |
+| `socc generate diagram` | `socc generate-diagram` | Mermaid / PlantUML / ASCII topology diagram |
+| `socc generate compliance` | `socc generate-compliance` | ISO 26262 / IEC 61508 functional-safety report |
+| `socc generate report` | `socc generate-report` | Self-contained HTML architecture report |
 
 ---
 
-### Design assistance
+### socc viz — visualization
 
-| Command | Description |
-|---------|-------------|
-| `socc power-seq` | Visualize the power-on / power-off sequencing order |
-| `socc pinmap` | Show the complete pin-mux assignment table |
-| `socc topology` | Render a text-art system topology diagram |
-| `socc audit` | Multi-domain audit: power, clock, GPIO, IRQ, thermal in one pass |
-| `socc simulate` | Simulate power-rail transitions and detect unsafe sequences |
-| `socc explain` | Explain a rule violation in plain English with fix examples |
+```
+socc viz COMMAND [OPTIONS]
+```
+
+| Subcommand | Old flat name | Description |
+|------------|--------------|-------------|
+| `socc viz topology` | `socc topology` | Interactive HTML hardware topology graph |
+| `socc viz pinmap` | `socc pinmap` | HTML BGA pin heatmap for a SoC |
+| `socc viz power-seq` | `socc power-seq` | ASCII power-rail startup sequence chart |
 
 ---
 
-### Vendor BSP tools
+### socc sim — simulation & live-board
 
-| Command | Description |
-|---------|-------------|
-| `socc audit-bom` | Cross-check DTS against a Bill-of-Materials CSV |
-| `socc generate-tests` | Generate pytest stubs for the current DTS constraints |
-| `socc amp-audit` | Asymmetric Multi-Processing (AMP) resource conflict check |
-| `socc trace` | Trace a device's full dependency chain (power + clock + IRQ) |
-| `socc migrate` | Assist in porting a DTS from one SoC to another |
-| `socc overlay-check` | Validate a DT overlay against its base DTS |
+```
+socc sim COMMAND [OPTIONS]
+```
+
+| Subcommand | Old flat name | Description |
+|------------|--------------|-------------|
+| `socc sim failure` | `socc simulate failure` | FMEA blast-radius simulation |
+| `socc sim smoke` | `socc simulate-smoke` | Physical-damage risk from DTS config errors |
+| `socc sim shell` | `socc shell` | Interactive power/clock state-machine shell |
+| `socc sim live-check` | `socc live-check` | SSH into a board and run consistency checks |
+| `socc sim live-probe` | `socc live-probe` | Compare DTS expectations vs. physical registers |
+| `socc sim trace` | `socc trace` | Trace how a node's properties change across overlays |
+| `socc sim migrate` | `socc migrate` | Assist in porting a DTS to a new target SoC |
+
+---
+
+### socc socdef — constraint files
+
+```
+socc socdef COMMAND [OPTIONS]
+```
+
+| Subcommand | Old flat name | Description |
+|------------|--------------|-------------|
+| `socc socdef validate` | `socc validate-socdef` | Validate a `.socdef` file |
+| `socc socdef check` | `socc check-socdef` | Check a DTS against a `.socdef` constraint file |
+| `socc socdef init` | `socc init-socdef` | Generate a `.socdef` template for a new SoC |
 
 ---
 
@@ -360,12 +369,45 @@ Drop socc into any pipeline:
 - name: Check DTS consistency
   run: |
     pip install soc-consistency
-    socc check board.dts --soc rk3588 --min-severity error --format json -o socc.json
-  continue-on-error: false
+    socc check board.dts --soc rk3588 --min-severity error --format sarif -o socc.sarif
 ```
 
-socc exits with code 0 on success and non-zero when violations at or above
-`--min-severity` are found.
+socc exits 0 on success, non-zero when violations at or above `--min-severity` are found.
+
+A ready-made GitHub Actions workflow with [OIDC Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+is included at [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
+
+---
+
+## Upgrading from pre-1.1
+
+All flat command names continue to work unchanged (they are registered as
+hidden aliases).  No scripts need to be updated.
+
+| Pre-1.1 command | 1.1+ equivalent |
+|-----------------|----------------|
+| `socc gc` | `socc analyze gc` |
+| `socc check-memory` | `socc analyze memory` |
+| `socc check-bounds` | `socc analyze bounds` |
+| `socc check-irq` | `socc analyze irq` |
+| `socc check-deps` | `socc analyze deps` |
+| `socc audit` | `socc audit bindings` |
+| `socc audit-bom` | `socc audit bom` |
+| `socc amp-audit` | `socc audit amp` |
+| `socc cross-check` | `socc audit cross-check` |
+| `socc generate-qemu` | `socc generate qemu` |
+| `socc generate-diagram` | `socc generate diagram` |
+| `socc export-headers` | `socc generate headers` |
+| `socc topology` | `socc viz topology` |
+| `socc pinmap` | `socc viz pinmap` |
+| `socc power-seq` | `socc viz power-seq` |
+| `socc shell` | `socc sim shell` |
+| `socc live-check` | `socc sim live-check` |
+| `socc simulate-smoke` | `socc sim smoke` |
+| `socc simulate failure NODE DTS` | `socc sim failure NODE DTS` |
+| `socc migrate` | `socc sim migrate` |
+| `socc validate-socdef` | `socc socdef validate` |
+| `socc check-socdef` | `socc socdef check` |
 
 ---
 
@@ -395,21 +437,30 @@ Quick overview by domain:
 
 ```
 socc/
-├── parser/        DTS → IR model (tokenizer + parser + mapper)
-├── model/         Dataclasses: SoC, PowerTree, ClockTree, IRNode
-├── rules/         Rule registry + vendor rule packs
-│   ├── common/    GIC, GPIO, DMA, MMIO rules
-│   └── rockchip/  Rockchip-specific power/clock/bus rules
-├── engine/        Rule executor + violation aggregator
-├── memmap.py      MMIO sweep-line overlap scanner
-├── depgraph.py    Power/clock cycle detector (DFS)
-├── smartdiff.py   Semantic DTS/DTB differ
-├── gc.py          Zombie-node garbage collector
-├── bounds.py      Physical resource bounds auditor
-├── irqcheck.py    IRQ collision & routing checker
-├── autofix.py     DTS patch generator
-├── report.py      HTML report renderer
-└── cli.py         Click-based CLI (43 commands)
+├── commands/          CLI command packages (new in 1.1)
+│   ├── core.py        Top-level commands: check, fix, rules, diff, …
+│   ├── audit_cmds.py  socc audit  — bindings, bom, kernel, amp, …
+│   ├── analyze_cmds.py socc analyze — memory, bounds, irq, deps, gc
+│   ├── generate_cmds.py socc generate — qemu, headers, diagram, …
+│   ├── viz_cmds.py    socc viz    — topology, pinmap, power-seq
+│   ├── sim_cmds.py    socc sim    — failure, smoke, shell, live-check, …
+│   ├── socdef_cmds.py socc socdef — validate, check, init
+│   └── _shared.py     Shared helpers: SoC lists, registry, helpers
+├── parser/            DTS → IR model (tokenizer + parser + mapper)
+├── model/             Dataclasses: SoC, PowerTree, ClockTree, IRNode
+├── rules/             Rule registry + vendor rule packs
+│   ├── common/        GIC, GPIO, DMA, MMIO rules
+│   └── rockchip/      Rockchip-specific power/clock/bus rules
+├── engine/            Rule executor + violation aggregator
+├── memmap.py          MMIO sweep-line overlap scanner
+├── depgraph.py        Power/clock cycle detector (DFS)
+├── smartdiff.py       Semantic DTS/DTB differ
+├── gc.py              Zombie-node garbage collector
+├── bounds.py          Physical resource bounds auditor
+├── irqcheck.py        IRQ collision & routing checker
+├── autofix.py         DTS patch generator
+├── report.py          HTML report renderer
+└── cli.py             Click group assembler (152 lines) + backward aliases
 ```
 
 The IR model is intentionally decoupled from the parser: you can load a
