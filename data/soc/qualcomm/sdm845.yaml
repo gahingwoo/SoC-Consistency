@@ -1,0 +1,71 @@
+soc: sdm845
+compatible: "qcom,sdm845"
+description: "Qualcomm Snapdragon 845 — 4x Kryo 385 Gold (A75-based) + 4x Silver (A55-based)"
+cpu:
+  big_cores: 4
+  big_type: kryo-385-gold
+  little_cores: 4
+  little_type: kryo-385-silver
+  max_freq_big_mhz: 2803
+  max_freq_little_mhz: 1766
+gpu:
+  type: adreno-630
+gcc:
+  base: 0x00100000
+  compatible: "qcom,sdm845-gcc"
+  description: "Global Clock Controller — source for all peripheral clocks"
+rpmh_clk:
+  compatible: "qcom,sdm845-rpmh-clk"
+  description: "RPMh-managed clocks (RPMH path for low-power clocks)"
+rpmpd:
+  compatible: "qcom,sdm845-rpmpd"
+  description: "RPM power domains (cx, mx, lmx, lx, mmcx)"
+tlmm:
+  base: 0x03400000
+  compatible: "qcom,sdm845-tlmm"
+  description: "Top Level Mode Multiplexer — single GPIO controller"
+  gpio_count: 150
+spmi_bus:
+  base: 0x0C000000
+  compatible: "qcom,spmi-pmic-arb"
+  description: "SPMI bus for PMIC (PM8998/PM8005)"
+gpio_banks:
+  - bank: tlmm
+    voltage_v: 1.8
+    note: "TLMM IO is 1.8V by default; HDRV pads support configurable voltage"
+power_domains:
+  - name: cx
+    description: "Core logic (CX) rail — shared by GPU, modem, USB3"
+    required: true
+  - name: mx
+    description: "Memory (MX) rail — required by DDR PHY"
+    required: true
+  - name: mmcx
+    description: "Multimedia CX rail — display, camera, video"
+  - name: lmx
+    description: "Low-power MX"
+  - name: lx
+    description: "Low CX"
+pmic:
+  name: PM8998
+  description: "Qualcomm PM8998 PMIC on SPMI bus"
+  key_rails:
+    - name: vdd_cx
+      description: "CX power domain supply"
+    - name: vdd_mx
+      description: "MX power domain supply"
+    - name: vddpx_1
+      description: "1.8V TLMM IO supply"
+clocks:
+  max_cpu_big_hz: 2803000000
+  max_cpu_little_hz: 1766000000
+  max_gpu_hz: 710000000
+  ref_hz: 19200000
+  note: "Qualcomm uses 19.2 MHz XO (crystal oscillator) as reference"
+subsystems:
+  - name: adsp
+    description: "Audio DSP — required for HiFi audio routing"
+  - name: cdsp
+    description: "Compute DSP — AI/ML offload"
+  - name: slpi
+    description: "Sensor Low-Power Island"

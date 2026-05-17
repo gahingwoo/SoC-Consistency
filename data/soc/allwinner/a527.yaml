@@ -1,0 +1,96 @@
+soc: a527
+compatible: "allwinner,sun55i-a527"
+description: "Allwinner A527 (T527) — 4x Cortex-A55 + 4x Cortex-A510 big.LITTLE, NPU"
+cpu:
+  big_cores: 4
+  big_type: cortex-a55
+  little_cores: 4
+  little_type: cortex-a510
+  max_freq_mhz: 1800
+gpu:
+  type: mali-g57-mc1
+  note: "Same IP family as H700/A523 GPU"
+npu:
+  tops: 2
+  description: "Built-in NPU for AI acceleration"
+ccu:
+  base: 0x02001000
+  compatible: "allwinner,sun55i-a527-ccu"
+r_ccu:
+  base: 0x07010000
+  compatible: "allwinner,sun55i-a527-r-ccu"
+  description: "Always-on clock controller for PMU domain"
+pio:
+  base: 0x02000000
+  compatible: "allwinner,sun55i-a527-pinctrl"
+r_pio:
+  base: 0x07020000
+  compatible: "allwinner,sun55i-a527-r-pinctrl"
+gpio_banks:
+  - bank: PA
+    voltage_v: 3.3
+  - bank: PB
+    voltage_v: 3.3
+  - bank: PC
+    voltage_v: 1.8
+    note: "1.8V — DO NOT connect to 3.3V signals"
+  - bank: PD
+    voltage_v: 3.3
+  - bank: PE
+    voltage_v: 3.3
+  - bank: PF
+    voltage_v: 3.3
+  - bank: PG
+    voltage_v: 1.8
+    note: "1.8V — WiFi/SDIO bank"
+  - bank: PH
+    voltage_v: 3.3
+  - bank: PI
+    voltage_v: 3.3
+  - bank: PL
+    voltage_v: 1.8
+    note: "1.8V — always-on R_PIO domain (RTC, power key)"
+power_domains:
+  - name: PD_CPU_BIGCORE
+    description: "Cortex-A55 big cluster"
+  - name: PD_CPU_LITCORE
+    description: "Cortex-A510 little cluster"
+  - name: PD_GPU
+    description: "Mali GPU domain"
+  - name: PD_NPU
+    description: "NPU inference engine"
+  - name: PD_VE
+    description: "Video Engine (H.265/H.264 codec)"
+  - name: PD_DE
+    description: "Display Engine"
+  - name: PD_CSI
+    description: "Camera MIPI-CSI"
+pmic:
+  name: AXP717
+  i2c_addr: "0x34"
+  channels:
+    - name: DCDC1
+      range_v: [0.5, 1.54]
+      description: "VDD_CPU_BIG"
+    - name: DCDC2
+      range_v: [0.5, 1.54]
+      description: "VDD_CPU_LITTLE / VDD_SYS"
+    - name: DCDC3
+      range_v: [0.5, 1.54]
+      description: "AVCC/VDD_DDR"
+    - name: DCDC4
+      range_v: [0.5, 3.6]
+      description: "VCC_3V3 / VDDBRICK"
+    - name: ALDO1
+      range_v: [0.5, 3.5]
+      description: "VCC_1V8_SYS"
+    - name: ALDO2
+      range_v: [0.5, 3.5]
+      description: "VCC_3V3_LPDDR"
+    - name: ALDO3
+      range_v: [0.5, 3.5]
+      description: "VCC_1V8_IO"
+clocks:
+  max_cpu_big_hz: 1800000000
+  max_cpu_little_hz: 1500000000
+  ref_hz: 24000000

@@ -1,0 +1,71 @@
+soc: a733
+compatible: "allwinner,sun55i-a733"
+description: "Allwinner A733 — sun55i industrial/automotive variant, 4x Cortex-A55"
+cpu:
+  cores: 4
+  type: cortex-a55
+  max_freq_mhz: 1800
+gpu:
+  type: mali-g57-mc1
+ccu:
+  base: 0x02001000
+  compatible: "allwinner,sun55i-a733-ccu"
+r_ccu:
+  base: 0x07010000
+  compatible: "allwinner,sun55i-a733-r-ccu"
+pio:
+  base: 0x02000000
+  compatible: "allwinner,sun55i-a733-pinctrl"
+r_pio:
+  base: 0x07020000
+  compatible: "allwinner,sun55i-a733-r-pinctrl"
+gpio_banks:
+  - bank: PA
+    voltage_v: 3.3
+  - bank: PB
+    voltage_v: 3.3
+  - bank: PC
+    voltage_v: 1.8
+    note: "1.8V — DO NOT connect to 3.3V signals"
+  - bank: PD
+    voltage_v: 3.3
+  - bank: PE
+    voltage_v: 3.3
+  - bank: PF
+    voltage_v: 3.3
+  - bank: PG
+    voltage_v: 1.8
+    note: "1.8V — WiFi/SDIO bank"
+  - bank: PH
+    voltage_v: 3.3
+  - bank: PL
+    voltage_v: 1.8
+    note: "1.8V — always-on R_PIO domain"
+power_domains:
+  - name: PD_CPU
+    description: "CPU cluster"
+  - name: PD_GPU
+    description: "GPU domain"
+  - name: PD_VE
+    description: "Video Engine"
+  - name: PD_DE
+    description: "Display Engine"
+pmic:
+  name: AXP717
+  i2c_addr: "0x34"
+  channels:
+    - name: DCDC1
+      range_v: [0.5, 1.54]
+      description: "VDD_CPU"
+    - name: DCDC2
+      range_v: [0.5, 1.54]
+      description: "VDD_SYS/CORE"
+    - name: DCDC4
+      range_v: [0.5, 3.6]
+      description: "VCC_3V3"
+    - name: ALDO1
+      range_v: [0.5, 3.5]
+      description: "VCC_1V8_IO"
+clocks:
+  max_cpu_hz: 1800000000
+  ref_hz: 24000000

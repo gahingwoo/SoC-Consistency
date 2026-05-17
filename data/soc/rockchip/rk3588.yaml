@@ -1,0 +1,254 @@
+# Rockchip RK3588 SoC 约束定义
+# 本文件定义了 RK3588 的电源、时钟、引脚等约束条件
+
+soc:
+  name: rk3588
+  version: "1.0"
+  description: "Rockchip RK3588 ARM SoC"
+
+power_domains:
+  - name: PD_CPU
+    voltage_range: [0.8, 1.1]  # Volts
+    description: "CPU Power Domain"
+    regulators:
+      - buck1
+      - buck2
+
+  - name: PD_GPU
+    voltage_range: [0.6, 0.9]
+    description: "GPU Power Domain"
+    regulators:
+      - buck3
+
+  - name: PD_VIO
+    voltage_range: [3.3, 3.3]
+    description: "IO Power Domain"
+    regulators:
+      - ldo1
+
+clock_providers:
+  - name: cru
+    type: cru
+    base: 0xff760000
+    description: "Clock Reset Unit"
+    outputs:
+      - apll
+      - dpll
+      - clk_i2c0
+      - clk_i2c1
+      - clk_spi0
+      - clk_uart0
+      - clk_uart1
+
+  - name: pmu_cru
+    type: cru
+    base: 0xfd7d0000
+    description: "PMU Clock Reset Unit"
+    outputs:
+      - clk_32k
+      - clk_osc
+
+clock_specifications:
+  # I2C 时钟频率范围
+  i2c_clk_range:
+    min_freq: 100000    # 100 kHz
+    max_freq: 400000    # 400 kHz (或 1MHz for fast-mode)
+
+  # UART 波特率范围
+  uart_baudrate_range:
+    min: 115200
+    max: 4000000
+
+  # SPI 时钟频率范围
+  spi_clk_range:
+    min_freq: 1000000
+    max_freq: 100000000  # 100 MHz
+
+gpio_banks:
+  - bank: 0
+    base: 0xfd8b0000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 0"
+
+  - bank: 1
+    base: 0xfd8c0000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 1"
+
+  - bank: 2
+    base: 0xfd8d0000
+    pins: 32
+    voltage: 1.8
+    description: "GPIO Bank 2"
+
+  - bank: 3
+    base: 0xfd8e0000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 3"
+
+  - bank: 4
+    base: 0xfd8f0000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 4"
+
+device_constraints:
+  i2c0:
+    required_clocks:
+      - clk_i2c0
+      - pclk_i2c0
+    required_supplies:
+      - vcc_io
+    max_pins: 2  # SDA, SCL
+    max_frequency: 400000
+
+  i2c1:
+    required_clocks:
+      - clk_i2c1
+      - pclk_i2c1
+    required_supplies:
+      - vcc_io
+    max_pins: 2
+    max_frequency: 400000
+
+  uart0:
+    required_clocks:
+      - clk_uart0
+      - pclk_uart0
+    required_supplies:
+      - vcc_io
+    max_pins: 4  # RX, TX, RTS, CTS
+    max_frequency: 4000000
+
+  spi0:
+    required_clocks:
+      - clk_spi0
+      - pclk_spi0
+    required_supplies:
+      - vcc_io
+    max_pins: 4  # CS, CLK, MOSI, MISO
+    max_frequency: 100000000
+
+power_tree_constraints:
+  root_supplies:
+    - vbat
+    - vin_sys
+  pmic_outputs:
+    - name: vdd_cpu
+      max_current_ma: 6000
+    - name: vdd_gpu
+      max_current_ma: 4000
+    - name: vcc_io
+      max_current_ma: 2000
+    - name: vcc_io_1v8
+      max_current_ma: 1500
+    - name: vcc_3v3
+      max_current_ma: 2000
+
+bga:
+  package: FCBGA-585
+  pitch_mm: 0.65
+  size_mm: "23x23"
+  rows: [A, B, C, D, E, F, G, H, J, K, L, M, N, P, R, T, U, V, W, Y, Z, AA, AB]
+  cols: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+  pins:
+    A1:  { type: power,  name: VDD_CPU_LIT }
+    A2:  { type: power,  name: VDD_CPU_LIT }
+    A3:  { type: ground, name: GND }
+    A4:  { type: power,  name: VDD_CPU_BIG }
+    A5:  { type: power,  name: VDD_CPU_BIG }
+    A6:  { type: ground, name: GND }
+    A7:  { type: power,  name: VDD_GPU }
+    A8:  { type: ground, name: GND }
+    A9:  { type: power,  name: VDD_NPU }
+    A10: { type: ground, name: GND }
+    A11: { type: power,  name: VCC_DDR }
+    A12: { type: power,  name: VCC_DDR }
+    A13: { type: ground, name: GND }
+    A14: { type: power,  name: VCC_1V8 }
+    A15: { type: power,  name: VCC_3V3 }
+    A16: { type: ground, name: GND }
+    B1:  { type: gpio,   name: GPIO0_A0, bank: 0, group: A, idx: 0 }
+    B2:  { type: gpio,   name: GPIO0_A1, bank: 0, group: A, idx: 1 }
+    B3:  { type: gpio,   name: GPIO0_A2, bank: 0, group: A, idx: 2 }
+    B4:  { type: gpio,   name: GPIO0_A3, bank: 0, group: A, idx: 3 }
+    B5:  { type: io,     name: I2C0_SDA, function: I2C }
+    B6:  { type: io,     name: I2C0_SCL, function: I2C }
+    B7:  { type: io,     name: I2C1_SDA, function: I2C }
+    B8:  { type: io,     name: I2C1_SCL, function: I2C }
+    C1:  { type: hs_io,  name: USB3_OTG0_TX_P, function: USB3 }
+    C2:  { type: hs_io,  name: USB3_OTG0_TX_N, function: USB3 }
+    C3:  { type: ground, name: GND }
+    C4:  { type: hs_io,  name: USB3_OTG0_RX_P, function: USB3 }
+    C5:  { type: hs_io,  name: USB3_OTG0_RX_N, function: USB3 }
+    C6:  { type: hs_io,  name: PCIE3X4_TX0_P,  function: PCIe }
+    C7:  { type: hs_io,  name: PCIE3X4_TX0_N,  function: PCIe }
+    C8:  { type: ground, name: GND }
+    C9:  { type: hs_io,  name: PCIE3X4_RX0_P,  function: PCIe }
+    C10: { type: hs_io,  name: PCIE3X4_RX0_N,  function: PCIe }
+    D1:  { type: hs_io,  name: PCIE3X4_TX1_P,  function: PCIe }
+    D2:  { type: hs_io,  name: PCIE3X4_TX1_N,  function: PCIe }
+    D3:  { type: ground, name: GND }
+    D4:  { type: hs_io,  name: PCIE3X4_RX1_P,  function: PCIe }
+    D5:  { type: hs_io,  name: PCIE3X4_RX1_N,  function: PCIe }
+    D6:  { type: hs_io,  name: PCIE3X4_TX2_P,  function: PCIe }
+    D7:  { type: hs_io,  name: PCIE3X4_TX2_N,  function: PCIe }
+    D8:  { type: hs_io,  name: PCIE3X4_RX2_P,  function: PCIe }
+    D9:  { type: hs_io,  name: PCIE3X4_RX2_N,  function: PCIe }
+    D10: { type: hs_io,  name: PCIE3X4_TX3_P,  function: PCIe }
+    E1:  { type: ddr,    name: DDR_A0 }
+    E2:  { type: ddr,    name: DDR_A1 }
+    E3:  { type: ddr,    name: DDR_A2 }
+    E4:  { type: ddr,    name: DDR_A3 }
+    E5:  { type: ddr,    name: DDR_DQ0 }
+    E6:  { type: ddr,    name: DDR_DQ1 }
+    E7:  { type: ddr,    name: DDR_DQ2 }
+    E8:  { type: ddr,    name: DDR_DQ3 }
+    E9:  { type: ddr,    name: DDR_DQS_P }
+    E10: { type: ddr,    name: DDR_DQS_N }
+    F1:  { type: hs_io,  name: GMAC0_TXD0,   function: GMAC }
+    F2:  { type: hs_io,  name: GMAC0_TXD1,   function: GMAC }
+    F3:  { type: hs_io,  name: GMAC0_TXEN,   function: GMAC }
+    F4:  { type: hs_io,  name: GMAC0_RXCLK,  function: GMAC }
+    F5:  { type: hs_io,  name: GMAC0_RXD0,   function: GMAC }
+    F6:  { type: hs_io,  name: GMAC0_RXD1,   function: GMAC }
+    G1:  { type: audio,  name: I2S0_SCLK,    function: I2S }
+    G2:  { type: audio,  name: I2S0_LRCK,    function: I2S }
+    G3:  { type: audio,  name: I2S0_SDO0,    function: I2S }
+    G4:  { type: audio,  name: I2S0_SDI0,    function: I2S }
+    G5:  { type: audio,  name: I2S0_MCLK,    function: I2S }
+    H1:  { type: jtag,   name: JTAG_TCK }
+    H2:  { type: jtag,   name: JTAG_TMS }
+    H3:  { type: jtag,   name: JTAG_TDI }
+    H4:  { type: jtag,   name: JTAG_TDO }
+    J1:  { type: io,     name: UART0_TX,     function: UART }
+    J2:  { type: io,     name: UART0_RX,     function: UART }
+    J3:  { type: io,     name: UART2_TX,     function: UART }
+    J4:  { type: io,     name: UART2_RX,     function: UART }
+    J5:  { type: io,     name: SPI0_CLK,     function: SPI }
+    J6:  { type: io,     name: SPI0_MOSI,    function: SPI }
+    J7:  { type: io,     name: SPI0_MISO,    function: SPI }
+    J8:  { type: io,     name: SPI0_CS0,     function: SPI }
+    K1:  { type: io,     name: EMMC_D0,      function: eMMC }
+    K2:  { type: io,     name: EMMC_D1,      function: eMMC }
+    K3:  { type: io,     name: EMMC_D2,      function: eMMC }
+    K4:  { type: io,     name: EMMC_D3,      function: eMMC }
+    K5:  { type: io,     name: EMMC_D4,      function: eMMC }
+    K6:  { type: io,     name: EMMC_D5,      function: eMMC }
+    K7:  { type: io,     name: EMMC_CMD,     function: eMMC }
+    K8:  { type: io,     name: EMMC_CLK,     function: eMMC }
+    # NC / reserved
+    AB1: { type: nc,     name: NC }
+    AB2: { type: nc,     name: NC }
+    AB3: { type: ground, name: GND }
+    AB4: { type: power,  name: VDD_IN }
+    AB5: { type: power,  name: VDD_IN }
+
+# 版本历史
+version_history:
+  - version: "1.0"
+    date: "2026-02-02"
+    description: "Initial version"

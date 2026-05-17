@@ -1,0 +1,111 @@
+name: socc-check
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "**.dts"
+      - "**.dtsi"
+      - "socc/**"
+      - "data/**"
+      - ".github/workflows/socc-check.yml"
+  pull_request:
+    paths:
+      - "**.dts"
+      - "**.dtsi"
+      - "socc/**"
+      - "data/**"
+
+jobs:
+  lint-dts:
+    name: SoC DTS consistency check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install socc
+        run: pip install -e ".[dev]"
+
+      - name: Check all DTS files (SARIF output)
+        id: socc
+        run: |
+          set +e
+          EXIT=0
+          # data/examples/ contains intentional demo fixtures with known violations
+          for dts in $(find . -name "*.dts" \
+              -not -path "./.venv/*" \
+              -not -path "./node_modules/*" \
+              -not -path "./data/examples/*"); do
+            echo "::group::Checking $dts"
+            socc check "$dts" --soc auto --format sarif --no-color \
+              --min-severity error \
+              > socc_result.sarif 2>&1
+            STATUS=$?
+            cat socc_result.sarif
+            if [ $STATUS -ne 0 ]; then EXIT=$STATUS; fi
+            echo "::endgroup::"
+          done
+          exit $EXIT
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: socc_result.sarif
+          category: socc-dts-lint
+        continue-on-error: true
+
+      - name: Fail on DTS errors
+        if: steps.socc.outcome == 'failure'
+        run: |
+          echo "::error::socc found DTS consistency errors — see annotations above."
+          exit 1
+
+  regression-diff:
+    name: DTS regression diff (PR only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install socc
+        run: pip install -e ".[dev]"
+
+      - name: Diff changed DTS files (base vs head)
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- "*.dts" "*.dtsi" || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No DTS files changed."
+            exit 0
+          fi
+          EXIT=0
+          for dts in $CHANGED; do
+            if [ ! -f "$dts" ]; then continue; fi
+            BEFORE=$(git show "$BASE_SHA:$dts" 2>/dev/null || true)
+            if [ -z "$BEFORE" ]; then continue; fi
+            git show "$BASE_SHA:$dts" > /tmp/before.dts
+            echo "Diffing $dts ..."
+            socc diff /tmp/before.dts "$dts" --soc auto --no-color || EXIT=1
+          done
+          exit $EXIT
+
+

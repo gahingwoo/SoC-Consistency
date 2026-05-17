@@ -1,0 +1,69 @@
+soc: sc2
+compatible: "amlogic,meson-sc2"
+description: "Amlogic Meson SC2 — S905X4/S905W2, 4x Cortex-A55, Mali-G31 MP2"
+cpu:
+  cores: 4
+  type: cortex-a55
+  max_freq_mhz: 2016
+gpu:
+  type: mali-g31-mp2
+npu:
+  tops: 1.2
+  description: "Built-in inference engine (S905X4/Y4 with NPU)"
+clkc:
+  base: 0xFE000000
+  compatible: "amlogic,meson-sc2-clkc"
+ao_clkc:
+  base: 0xFE010000
+  compatible: "amlogic,meson-sc2-aoclkc"
+gpio:
+  ee_base: 0xFE004480
+  ao_base: 0xFE000014
+  compatible_ee: "amlogic,meson-sc2-periphs-pinctrl"
+  compatible_ao: "amlogic,meson-sc2-aobus-pinctrl"
+gpio_banks:
+  - bank: GPIOD
+    domain: EE
+    voltage_v: 3.3
+  - bank: GPIOE
+    domain: EE
+    voltage_v: 3.3
+  - bank: GPIOH
+    domain: EE
+    voltage_v: 3.3
+  - bank: GPIOB
+    domain: EE
+    voltage_v: 1.8
+    note: "1.8V — eMMC/SDIO bank"
+  - bank: GPIOC
+    domain: EE
+    voltage_v: 1.8
+    note: "1.8V — DO NOT supply at 3.3V"
+  - bank: GPIOX
+    domain: EE
+    voltage_v: 3.3
+  - bank: GPIOZ
+    domain: EE
+    voltage_v: 3.3
+  - bank: GPIOAO
+    domain: AO
+    voltage_v: 3.3
+    description: "Always-on domain: UART AO, IR, power key"
+power_domains:
+  - name: PD_VDEC
+    description: "Video decoder (4K H.265/VP9)"
+  - name: PD_VPU
+    description: "Video Processing Unit"
+  - name: PD_ETH
+    description: "Ethernet"
+  - name: VDDAO
+    required: true
+    description: "Always-on supply — must be present for AO domain"
+pmic:
+  name: external
+  description: "Board-level PMIC (typically via I2C); no integrated PMIC"
+clocks:
+  max_cpu_hz: 2016000000
+  max_gpu_hz: 800000000
+  ref_hz: 24000000
+  ao_always_on: true

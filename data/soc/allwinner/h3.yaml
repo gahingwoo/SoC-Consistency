@@ -1,0 +1,156 @@
+# Allwinner H3/H2+ SoC constraint definitions
+# CPU: 4x Cortex-A7 (up to 1.296 GHz) - sun8iw7p1
+# GPU: Mali-400 MP2
+# Used in: Orange Pi PC/PC+/One, NanoPi M1/Neo, Banana Pi M2+
+# Compatible strings: allwinner,sun8i-h3 / allwinner,sun8i-h2-plus
+# Source: mainline Linux arch/arm/boot/dts/allwinner/
+
+soc:
+  name: sun8i-h3
+  version: "1.0"
+  description: "Allwinner H3/H2+ ARM Cortex-A7 SoC (sun8iw7)"
+
+power_domains:
+  - name: PD_VCC_IO
+    voltage_range: [3.0, 3.6]
+    description: "IO Power Domain 3.3V"
+    regulators:
+      - vcc_io
+
+  - name: PD_VCC_CPU
+    voltage_range: [0.9, 1.3]
+    description: "CPU Core Power Domain"
+    regulators:
+      - vdd_cpu
+
+  - name: PD_VDDIO_3V3
+    voltage_range: [3.0, 3.6]
+    description: "General purpose 3.3V"
+    regulators:
+      - vcc_3v3
+
+  - name: PD_VDDIO_1V8
+    voltage_range: [1.62, 1.98]
+    description: "1.8V IO for eMMC/SDIO"
+    regulators:
+      - vcc_1v8
+
+clock_providers:
+  - name: ccu
+    type: ccu
+    base: 0x01C20000
+    compatible: "allwinner,sun8i-h3-ccu"
+    description: "H3 Clock Control Unit"
+    outputs:
+      - clk_i2c0
+      - clk_i2c1
+      - clk_i2c2
+      - clk_spi0
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+      - clk_uart3
+      - clk_emac
+      - clk_mmc0
+      - clk_mmc1
+      - clk_mmc2
+      - clk_usb
+
+  - name: r_ccu
+    type: ccu
+    base: 0x01F01400
+    compatible: "allwinner,sun8i-h3-r-ccu"
+    description: "H3 R_CCU (Always-On)"
+    outputs:
+      - clk_r_apb
+      - clk_r_pio
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 9600
+    max: 1500000   # H3 max UART rate
+
+  spi_clk_range:
+    min_freq: 3000000
+    max_freq: 100000000
+
+gpio_banks:
+  - bank: A
+    base: 0x01C20800
+    pins: 22
+    voltage: 3.3
+    compatible: "allwinner,sun8i-h3-pinctrl"
+    description: "Port A (PA0-PA21)"
+
+  - bank: C
+    base: 0x01C20800
+    pins: 14
+    voltage: 3.3
+    description: "Port C (PC0-PC13) - SPI/MMC"
+
+  - bank: D
+    base: 0x01C20800
+    pins: 18
+    voltage: 3.3
+    description: "Port D (PD0-PD17) - Display"
+
+  - bank: E
+    base: 0x01C20800
+    pins: 16
+    voltage: 3.3
+    description: "Port E (PE0-PE15)"
+
+  - bank: F
+    base: 0x01C20800
+    pins: 6
+    voltage: 3.3
+    description: "Port F (PF0-PF5) - SD card"
+
+  - bank: G
+    base: 0x01C20800
+    pins: 14
+    voltage: 3.3
+    description: "Port G (PG0-PG13) - WiFi/BT"
+
+device_constraints:
+  i2c0:
+    required_clocks: [clk_i2c0]
+    required_supplies: [vcc_io]
+    max_pins: 2
+    max_frequency: 400000
+
+  spi0:
+    required_clocks: [clk_spi0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 100000000
+
+  uart0:
+    required_clocks: [clk_uart0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 1500000
+
+  emac:
+    required_clocks: [clk_emac]
+    required_supplies: [vcc_io]
+    max_pins: 14
+
+power_tree_constraints:
+  root_supplies:
+    - vcc_5v
+
+  pmic_outputs:
+    - vdd_cpu       # AXP209 DCDC2
+    - vcc_3v3       # AXP209 LDO / fixed
+    - vcc_1v8       # AXP209 LDO
+    - vcc_ddr       # AXP209 DCDC3
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial H3/H2+ constraints based on mainline DTS and sun8iw7 datasheet"

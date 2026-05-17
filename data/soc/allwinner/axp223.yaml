@@ -1,0 +1,100 @@
+pmic: AXP223
+vendor: X-Powers
+description: "AXP223 — compact PMIC for Allwinner H3/H2+, sun8i SoCs; used on Orange Pi PC, NanoPi NEO"
+i2c_addr: "0x34"
+compatible: "x-powers,axp223"
+note: "AXP223 is a simplified single-cell Li-Ion PMU without independent GPU rail"
+
+dcdc:
+  - channel: DCDC1
+    name: "DCDC1"
+    range_v: [1.6, 3.4]
+    step_mv: 100
+    default_v: 3.3
+    description: "IOVCC-3V3 — main 3.3V system rail (most IOs)"
+  - channel: DCDC2
+    name: "DCDC2"
+    range_v: [0.6, 1.54]
+    step_mv: 20
+    default_v: 1.1
+    description: "VDD-CPU — Cortex-A7 core voltage (DVS)"
+  - channel: DCDC3
+    name: "DCDC3"
+    range_v: [0.6, 1.86]
+    step_mv: 20
+    default_v: 1.5
+    description: "VDD-DDR — DRAM core supply"
+
+aldo:
+  - channel: ALDO1
+    name: "ALDO1"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.0
+    description: "AVCC — PLL analog supply / USB PHY (2.5–3.0V)"
+    note: "Orange Pi PC: connected to USB PHY at 3.0V"
+  - channel: ALDO2
+    name: "ALDO2"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 1.8
+    description: "VCC-PC — GPIO PC bank 1.8V supply"
+    note: "PC bank is a 1.8V bank — MUST NOT exceed 1.98V"
+  - channel: ALDO3
+    name: "ALDO3"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.0
+    description: "VCC-PD — GPIO PD bank (sometimes used for CVBS analog)"
+
+dldo:
+  - channel: DLDO1
+    name: "DLDO1"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-HDMI — HDMI DDC / hot-plug 3.3V"
+  - channel: DLDO2
+    name: "DLDO2"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-SDCARD — SD-card VDD (3.3V)"
+  - channel: DLDO3
+    name: "DLDO3"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 2.8
+    description: "VCC-WIFI / VCC-USB-HUB (board dependent)"
+  - channel: DLDO4
+    name: "DLDO4"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-PE — GPIO PE bank (CSI camera)"
+
+eldo:
+  - channel: ELDO1
+    name: "ELDO1"
+    range_v: [0.7, 1.9]
+    step_mv: 50
+    default_v: 1.8
+    description: "VCC-CPVDD — CPU PLL analog (1.8V)"
+  - channel: ELDO2
+    name: "ELDO2"
+    range_v: [0.7, 1.9]
+    step_mv: 50
+    default_v: 1.8
+    description: "VCC-HS-USB — USB 1.8V PHY supply"
+  - channel: ELDO3
+    name: "ELDO3"
+    range_v: [0.7, 1.9]
+    step_mv: 50
+    default_v: 1.2
+    description: "VCC-PG — GPIO PG bank (usually WiFi domain)"
+
+constraints:
+  - rule: "DCDC2 (VDD-CPU) range for H3: 0.9–1.3V; do not set above 1.3V"
+  - rule: "DCDC3 = 1.5V for DDR3; 1.35V for DDR3L — must match DRAM spec"
+  - rule: "ALDO2 (VCC-PC) MUST be 1.8V — PC bank is a 1.8V bank on H3/H2+"
+  - rule: "Any LDO feeding 1.8V GPIO bank must not be raised above 1.98V"

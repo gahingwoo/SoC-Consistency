@@ -1,0 +1,147 @@
+# Allwinner H6 SoC constraint definitions
+# CPU: 4x Cortex-A53 (up to 1.8 GHz) - sun50iw6p1
+# GPU: Mali-T720 MP2
+# Used in: Orange Pi One Plus, Orange Pi 3, Pine H64, Tanix TX6
+# Compatible strings: allwinner,sun50i-h6
+# Source: mainline Linux arch/arm64/boot/dts/allwinner/
+
+soc:
+  name: sun50i-h6
+  version: "1.0"
+  description: "Allwinner H6 ARM Cortex-A53 SoC (sun50iw6) with USB3 and PCIe"
+
+power_domains:
+  - name: PD_CPU
+    voltage_range: [0.81, 1.16]
+    description: "CPU Core Power Domain (AXP805 DCDC2)"
+    regulators:
+      - dcdc2
+
+  - name: PD_GPU
+    voltage_range: [0.81, 1.1]
+    description: "GPU Power Domain"
+    regulators:
+      - dcdc1
+
+  - name: PD_VCC_IO
+    voltage_range: [2.85, 3.3]
+    description: "3.3V IO Power Domain"
+    regulators:
+      - cldo1
+
+  - name: PD_VCC_1V8
+    voltage_range: [1.62, 1.98]
+    description: "1.8V IO (eMMC/WiFi)"
+    regulators:
+      - cldo3
+
+clock_providers:
+  - name: ccu
+    type: ccu
+    base: 0x03001000
+    compatible: "allwinner,sun50i-h6-ccu"
+    description: "H6 Clock Control Unit"
+    outputs:
+      - clk_i2c0
+      - clk_i2c1
+      - clk_i2c2
+      - clk_i2c3
+      - clk_spi0
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+      - clk_uart3
+      - clk_emac
+      - clk_mmc0
+      - clk_mmc1
+      - clk_mmc2
+      - clk_usb0
+      - clk_usb3
+      - clk_pcie
+
+  - name: r_ccu
+    type: ccu
+    base: 0x07010000
+    compatible: "allwinner,sun50i-h6-r-ccu"
+    description: "H6 R_CCU"
+    outputs:
+      - clk_r_apb
+      - clk_r_pio
+      - clk_r_uart
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 9600
+    max: 4000000
+
+  spi_clk_range:
+    min_freq: 3000000
+    max_freq: 100000000
+
+gpio_banks:
+  - bank: A
+    base: 0x0300B000
+    pins: 16
+    voltage: 3.3
+    compatible: "allwinner,sun50i-h6-pinctrl"
+    description: "Port A (PA0-PA15)"
+
+  - bank: C
+    base: 0x0300B000
+    pins: 8
+    voltage: 1.8
+    description: "Port C (PC0-PC7) - eMMC, 1.8V"
+
+  - bank: D
+    base: 0x0300B000
+    pins: 21
+    voltage: 3.3
+    description: "Port D (PD0-PD20)"
+
+  - bank: F
+    base: 0x0300B000
+    pins: 6
+    voltage: 3.3
+    description: "Port F (PF0-PF5) - SD card"
+
+  - bank: G
+    base: 0x0300B000
+    pins: 14
+    voltage: 1.8
+    description: "Port G (PG0-PG13) - WiFi/BT, 1.8V"
+
+  - bank: H
+    base: 0x0300B000
+    pins: 12
+    voltage: 3.3
+    description: "Port H (PH0-PH11)"
+
+device_constraints:
+  usb3:
+    required_clocks: [clk_usb3]
+    required_supplies: [vcc_io]
+    description: "USB 3.0 SuperSpeed interface"
+
+  pcie:
+    required_clocks: [clk_pcie]
+    required_supplies: [vcc_io]
+    description: "PCIe 2.1 x1 interface"
+
+power_tree_constraints:
+  root_supplies:
+    - vcc_5v
+
+  pmic_outputs:
+    - dcdc1    # VDD_GPU/SYS
+    - dcdc2    # VDD_CPU
+    - cldo1    # VCC-IO 3.3V
+    - cldo3    # VCC-1.8V
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial H6 constraints based on mainline DTS and AXP805 datasheet"

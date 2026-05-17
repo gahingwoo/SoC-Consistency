@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+*.whl
+.eggs/
+pip-wheel-metadata/
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.tox/
+nosetests.xml
+junit*.xml
+
+# Type checkers & linters
+.mypy_cache/
+.dmypy.json
+.pyre/
+.ruff_cache/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# pyvis vendor assets (auto-copied at render time)
+lib/
+
+# Generated outputs
+*.html
+!docs/**/*.html
+socc_topology_*.html
+topology_*.html
+
+# Temp / scratch
+/tmp/
+*.tmp
+*.bak
+*.orig
+
+# Distribution / packaging
+.Python
+site-packages/
+lib64/

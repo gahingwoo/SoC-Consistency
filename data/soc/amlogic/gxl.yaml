@@ -1,0 +1,70 @@
+soc: gxl
+compatible: "amlogic,meson-gxl"
+description: "Amlogic Meson GXL — S905X/D/W, 4x Cortex-A53, Mali-450 MP3"
+cpu:
+  cores: 4
+  type: cortex-a53
+  max_freq_mhz: 1512
+gpu:
+  type: mali-450-mp3
+clkc:
+  base: 0xC883C000
+  compatible: "amlogic,meson-gxl-clkc"
+ao_clkc:
+  base: 0xC8100000
+  compatible: "amlogic,meson-gxl-aoclkc"
+  description: "Always-on clock controller for AO domain"
+gpio:
+  ee_base: 0xC88344B8
+  ao_base: 0xC8100014
+  compatible_ee: "amlogic,meson-gxl-periphs-pinctrl"
+  compatible_ao: "amlogic,meson-gxl-aobus-pinctrl"
+gpio_banks:
+  - bank: GPIOX
+    domain: EE
+    voltage_v: 3.3
+    description: "SDIO, PCM, general I/O"
+  - bank: GPIODV
+    domain: EE
+    voltage_v: 3.3
+    description: "I2C, PWM, I2S"
+  - bank: GPIOH
+    domain: EE
+    voltage_v: 3.3
+    description: "HDMI hot-plug, SPI"
+  - bank: GPIOBOOT
+    domain: EE
+    voltage_v: 3.3
+    description: "eMMC/SD boot pins"
+  - bank: GPIOC
+    domain: EE
+    voltage_v: 1.8
+    note: "1.8V — DO NOT supply at 3.3V"
+  - bank: GPIOA
+    domain: EE
+    voltage_v: 1.8
+    note: "1.8V — DO NOT supply at 3.3V"
+  - bank: GPIOZ
+    domain: EE
+    voltage_v: 3.3
+    description: "Ethernet, SPDIF"
+  - bank: GPIOAO
+    domain: AO
+    voltage_v: 3.3
+    description: "Always-on domain: UART AO, IR, power key"
+power_domains:
+  - name: PD_VPU
+    description: "Video Processing Unit (display)"
+  - name: PD_ETH
+    description: "Ethernet MAC power island"
+  - name: PD_VDEC
+    description: "Video decoder (H.265/VP9)"
+  - name: VDDAO
+    description: "Always-on power supply (3.3V or 1.8V, board dependent)"
+    required: true
+    note: "vddao MUST be present for AO domain devices (UART AO, IR, RTC)"
+clocks:
+  max_cpu_hz: 1512000000
+  max_gpu_hz: 750000000
+  ref_hz: 24000000
+  ao_always_on: true

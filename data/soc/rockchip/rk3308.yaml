@@ -1,0 +1,57 @@
+soc: rk3308
+compatible: "rockchip,rk3308"
+description: "Rockchip RK3308 — 4x Cortex-A35, audio-focused IoT SoC"
+cpu:
+  cores: 4
+  type: cortex-a35
+  max_freq_mhz: 1300
+gpu:
+  type: none
+  note: "No GPU — this is an audio/IoT SoC with 8-channel I2S, PDM mic array"
+cru:
+  base: 0xFF500000
+  compatible: "rockchip,rk3308-cru"
+gpio_banks:
+  - bank: 0
+    base: 0xFF220000
+    voltage_v: 3.3
+  - bank: 1
+    base: 0xFF230000
+    voltage_v: 3.3
+  - bank: 2
+    base: 0xFF240000
+    voltage_v: 3.3
+  - bank: 3
+    base: 0xFF250000
+    voltage_v: 3.3
+  - bank: 4
+    base: 0xFF260000
+    voltage_v: 3.3
+power_domains: []
+pmic:
+  name: RK809
+  i2c_addr: "0x20"
+  channels:
+    - name: DCDC1
+      range_v: [0.6, 1.5]
+      description: "VDD_CPU"
+    - name: DCDC2
+      range_v: [0.6, 1.5]
+      description: "VDD_CORE"
+    - name: DCDC4
+      range_v: [0.6, 3.4]
+      description: "VCC_3V3"
+    - name: LDO1
+      range_v: [0.6, 3.4]
+      description: "VCC_1V8"
+    - name: LDO2
+      range_v: [0.6, 3.4]
+      description: "VDD_1V0"
+audio:
+  description: "Integrated 8-channel I2S/TDM, PDM mic array, SPDIF, VAD"
+  internal_codec: true
+  max_adc_channels: 8
+  max_dac_channels: 2
+clocks:
+  max_cpu_hz: 1300000000
+  ref_hz: 24000000

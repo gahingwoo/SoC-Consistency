@@ -1,0 +1,75 @@
+soc: rk3528
+compatible: "rockchip,rk3528"
+description: "Rockchip RK3528 — 4x Cortex-A53, Mali-450 MP2 (2023 cost-down)"
+cpu:
+  cores: 4
+  type: cortex-a53
+  max_freq_mhz: 2016
+gpu:
+  type: mali-450-mp2
+cru:
+  base: 0xFF4A0000
+  compatible: "rockchip,rk3528-cru"
+pmu:
+  base: 0xFF600000
+  compatible: "rockchip,rk3528-pmu"
+gpio_banks:
+  - bank: 0
+    base: 0xFF610000
+    voltage_v: 3.3
+    in_pmu_domain: true
+  - bank: 1
+    base: 0xFFAF0000
+    voltage_v: 3.3
+  - bank: 2
+    base: 0xFFB00000
+    voltage_v: 3.3
+  - bank: 3
+    base: 0xFFB10000
+    voltage_v: 3.3
+  - bank: 4
+    base: 0xFFB20000
+    voltage_v: 3.3
+power_domains:
+  - name: PD_GPU
+    description: "Mali-450 GPU"
+  - name: PD_RKVDEC
+    description: "H.265/H.264 video decoder"
+  - name: PD_RKVENC
+    description: "H.265/H.264 video encoder"
+  - name: PD_VO
+    description: "Video Output (HDMI/VOP)"
+  - name: PD_VPU
+    description: "Video Processing Unit (eMMC, USB, PCIe)"
+pmic:
+  name: RK806
+  i2c_addr: "0x23"
+  channels:
+    - name: DCDC1
+      range_v: [0.5, 1.5]
+      description: "VDD_CPU"
+    - name: DCDC2
+      range_v: [0.5, 1.5]
+      description: "VDD_GPU/NPU"
+    - name: DCDC3
+      range_v: [0.5, 3.4]
+      description: "VDD_DDR"
+    - name: DCDC4
+      range_v: [0.5, 3.4]
+      description: "VCC_3V3"
+    - name: LDO1
+      range_v: [0.6, 3.4]
+      description: "VDD_1V8_PMU"
+    - name: LDO2
+      range_v: [0.6, 3.4]
+      description: "VCC_1V8_FLASH"
+    - name: LDO3
+      range_v: [0.6, 3.4]
+      description: "VCC_1V8_IO"
+    - name: LDO4
+      range_v: [0.6, 3.4]
+      description: "VCC_1V8_USB"
+clocks:
+  max_cpu_hz: 2016000000
+  max_gpu_hz: 700000000
+  ref_hz: 24000000

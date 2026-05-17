@@ -1,0 +1,166 @@
+# Amlogic GXBB (S905) SoC constraint definitions
+# CPU: 4x Cortex-A53 (up to 1.512 GHz)
+# GPU: Mali-450 MP3
+# Used in: Hardkernel ODROID-C2, Libre Computer AML-S905X-CC, various TV boxes
+# Compatible string: amlogic,meson-gxbb
+# Source: mainline Linux arch/arm64/boot/dts/amlogic/
+
+soc:
+  name: meson-gxbb
+  version: "1.0"
+  description: "Amlogic GXBB (S905) ARM Cortex-A53 SoC"
+
+power_domains:
+  - name: PD_VDD_EE
+    voltage_range: [0.9, 1.1]
+    description: "EE (External Entity) SoC core power"
+    regulators:
+      - vdd_ee     # Typically SY8113B or similar
+
+  - name: PD_VDD_CPU
+    voltage_range: [0.86, 1.1]
+    description: "CPU core power (DVFS)"
+    regulators:
+      - vdd_cpu
+
+  - name: PD_VCC_3V3
+    voltage_range: [3.0, 3.6]
+    description: "3.3V peripheral IO power"
+    regulators:
+      - vcc_3v3
+
+  - name: PD_VCC_1V8
+    voltage_range: [1.62, 1.98]
+    description: "1.8V IO (eMMC, WiFi)"
+    regulators:
+      - vcc_1v8
+
+  - name: PD_VDDAO
+    voltage_range: [0.9, 1.1]
+    description: "Always-On domain power (AO)"
+    regulators:
+      - vddao
+
+clock_providers:
+  - name: clkc
+    type: clkc
+    base: 0xC883C000
+    compatible: "amlogic,meson-gxbb-clkc"
+    description: "GXBB Main Clock Controller"
+    outputs:
+      - clk_cpu
+      - clk_ddr
+      - clk_eth
+      - clk_sd_emmc_a
+      - clk_sd_emmc_b
+      - clk_sd_emmc_c
+      - clk_usb
+      - clk_i2c
+      - clk_spi
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+
+  - name: ao_clkc
+    type: clkc
+    base: 0xC8100000
+    compatible: "amlogic,meson-gxbb-aoclkc"
+    description: "GXBB Always-On Clock Controller"
+    outputs:
+      - clk_ao_i2c
+      - clk_ao_uart
+      - clk_ao_ir
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 9600
+    max: 4000000
+
+  spi_clk_range:
+    min_freq: 1000000
+    max_freq: 100000000
+
+gpio_banks:
+  - bank: GPIOX
+    base: 0xC8834400
+    pins: 23
+    voltage: 3.3
+    compatible: "amlogic,meson-gxbb-periphs-pinctrl"
+    description: "GPIOX bank (3.3V)"
+
+  - bank: GPIODV
+    base: 0xC8834400
+    pins: 30
+    voltage: 1.8
+    description: "GPIODV bank (1.8V) - DDR/eMMC region"
+
+  - bank: GPIOH
+    base: 0xC8834400
+    pins: 9
+    voltage: 3.3
+    description: "GPIOH bank (3.3V)"
+
+  - bank: GPIOBOOT
+    base: 0xC8834400
+    pins: 16
+    voltage: 3.3
+    description: "GPIOBOOT bank (3.3V) - NAND/eMMC boot"
+
+  - bank: GPIOC
+    base: 0xC8834400
+    pins: 8
+    voltage: 1.8
+    description: "GPIOC bank (1.8V)"
+
+  - bank: GPIOA
+    base: 0xC8834400
+    pins: 16
+    voltage: 1.8
+    description: "GPIOA bank (1.8V) - ADC/analog"
+
+  - bank: GPIOAO
+    base: 0xC8100014
+    compatible: "amlogic,meson-gxbb-aobus-pinctrl"
+    pins: 14
+    voltage: 3.3
+    description: "GPIOAO always-on bank"
+
+device_constraints:
+  i2c_ao:
+    required_clocks: [clk_ao_i2c]
+    required_supplies: [vddao]
+    max_pins: 2
+    max_frequency: 400000
+    description: "Always-on I2C (survives suspend)"
+
+  uart_ao:
+    required_clocks: [clk_ao_uart]
+    required_supplies: [vddao]
+    max_pins: 4
+    max_frequency: 4000000
+    description: "Always-on UART (debug console)"
+
+  eth:
+    required_clocks: [clk_eth]
+    required_supplies: [vcc_3v3]
+    max_pins: 14
+
+power_tree_constraints:
+  root_supplies:
+    - vcc_5v
+
+  pmic_outputs:
+    - vdd_cpu
+    - vdd_ee
+    - vddao
+    - vcc_3v3
+    - vcc_1v8
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial GXBB/S905 constraints based on mainline DTS"

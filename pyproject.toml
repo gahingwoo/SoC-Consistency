@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["socc*"]
+
+[tool.setuptools.package-data]
+"socc" = ["py.typed"]
+"data" = ["**/*.yaml", "**/*.dts"]
+
+[project]
+name = "soc-consistency"
+version = "1.0.0"
+description = "Static analysis tool that catches hardware-level bugs in Linux Device Tree Source (DTS) files"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "gahingwoo", email = "huhuvmb88@outlook.com"}
+]
+keywords = [
+    "device-tree", "dts", "dtb", "soc", "linux", "embedded", "hardware",
+    "static-analysis", "linter", "rockchip", "allwinner", "arm"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Hardware",
+    "Topic :: Utilities",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "dataclasses-json>=0.5.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=3.0",
+    "black>=22.0",
+    "isort>=5.0",
+    "mypy>=0.990",
+    "flake8>=4.0",
+]
+viz = [
+    "pyvis>=0.3.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/gahingwoo/SoC-Consistency"
+Repository = "https://github.com/gahingwoo/SoC-Consistency"
+"Bug Tracker" = "https://github.com/gahingwoo/SoC-Consistency/issues"
+Changelog = "https://github.com/gahingwoo/SoC-Consistency/releases"
+
+[project.scripts]
+socc = "socc.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+

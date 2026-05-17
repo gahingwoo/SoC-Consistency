@@ -1,0 +1,173 @@
+# Amlogic G12A (S905X2/S905D2/S905Y2) SoC constraint definitions
+# CPU: 4x Cortex-A53 (up to 1.908 GHz)
+# GPU: Mali-G31 MP2 (up to 800 MHz)
+# NPU: none (A311D variant adds NPU, covered by G12B)
+# Used in: Hardkernel ODROID-C4 (sm1), Beelink GT-King, Khadas VIM3L (sm1)
+# Compatible string: amlogic,meson-g12a
+# Source: mainline Linux arch/arm64/boot/dts/amlogic/
+
+soc:
+  name: meson-g12a
+  version: "1.0"
+  description: "Amlogic G12A (S905X2/D2/Y2) ARM Cortex-A53 SoC"
+
+power_domains:
+  - name: PD_VDD_CPU
+    voltage_range: [0.73, 1.02]
+    description: "CPU core power (DVFS via BUCK converter)"
+    regulators:
+      - vdd_cpu
+
+  - name: PD_VDD_GPU
+    voltage_range: [0.6, 0.9]
+    description: "GPU Mali-G31 power domain"
+    regulators:
+      - vdd_gpu
+
+  - name: PD_VDD_EE
+    voltage_range: [0.85, 1.0]
+    description: "SoC EE domain (SoC logic core)"
+    regulators:
+      - vdd_ee
+
+  - name: PD_VCC_3V3
+    voltage_range: [3.0, 3.6]
+    description: "3.3V peripheral IO"
+    regulators:
+      - vcc_3v3
+
+  - name: PD_VCC_1V8
+    voltage_range: [1.62, 1.98]
+    description: "1.8V IO (eMMC, DDR4)"
+    regulators:
+      - vcc_1v8
+
+  - name: PD_VDDAO
+    voltage_range: [0.9, 1.05]
+    description: "Always-On domain (survives suspend)"
+    regulators:
+      - vddao
+
+clock_providers:
+  - name: clkc
+    type: clkc
+    base: 0xFF63C000
+    compatible: "amlogic,meson-g12a-clkc"
+    description: "G12A Main Clock Controller"
+    outputs:
+      - clk_cpu
+      - clk_ddr
+      - clk_eth
+      - clk_sd_emmc_a
+      - clk_sd_emmc_b
+      - clk_sd_emmc_c
+      - clk_usb
+      - clk_i2c
+      - clk_spi
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+      - clk_pcie
+
+  - name: ao_clkc
+    type: clkc
+    base: 0xFF800000
+    compatible: "amlogic,meson-g12a-aoclkc"
+    description: "G12A Always-On Clock Controller"
+    outputs:
+      - clk_ao_i2c
+      - clk_ao_uart
+      - clk_ao_ir
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 9600
+    max: 4000000
+
+  spi_clk_range:
+    min_freq: 1000000
+    max_freq: 100000000
+
+gpio_banks:
+  - bank: GPIOZ
+    base: 0xFF634480
+    pins: 16
+    voltage: 3.3
+    compatible: "amlogic,meson-g12a-periphs-pinctrl"
+    description: "GPIOZ bank"
+
+  - bank: GPIOH
+    base: 0xFF634480
+    pins: 9
+    voltage: 3.3
+    description: "GPIOH bank"
+
+  - bank: BOOT
+    base: 0xFF634480
+    pins: 16
+    voltage: 3.3
+    description: "BOOT bank (eMMC boot)"
+
+  - bank: GPIOC
+    base: 0xFF634480
+    pins: 8
+    voltage: 1.8
+    description: "GPIOC bank (1.8V) - SD card"
+
+  - bank: GPIOA
+    base: 0xFF634480
+    pins: 16
+    voltage: 1.8
+    description: "GPIOA bank (1.8V)"
+
+  - bank: GPIOX
+    base: 0xFF634480
+    pins: 20
+    voltage: 3.3
+    description: "GPIOX bank (general purpose)"
+
+  - bank: GPIOAO
+    base: 0xFF800014
+    compatible: "amlogic,meson-g12a-aobus-pinctrl"
+    pins: 16
+    voltage: 3.3
+    description: "GPIOAO always-on bank"
+
+device_constraints:
+  i2c_ao:
+    required_clocks: [clk_ao_i2c]
+    required_supplies: [vddao]
+    max_pins: 2
+    max_frequency: 400000
+
+  uart_ao:
+    required_clocks: [clk_ao_uart]
+    required_supplies: [vddao]
+    max_pins: 4
+    max_frequency: 4000000
+
+  pcie:
+    required_clocks: [clk_pcie]
+    required_supplies: [vcc_3v3]
+    description: "PCIe 2.0 x1 (G12A/G12B)"
+
+power_tree_constraints:
+  root_supplies:
+    - vcc_5v
+
+  pmic_outputs:
+    - vdd_cpu
+    - vdd_gpu
+    - vdd_ee
+    - vddao
+    - vcc_3v3
+    - vcc_1v8
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial G12A/S905X2 constraints based on mainline DTS"

@@ -1,0 +1,695 @@
+soc: imx8mp
+compatible: "fsl,imx8mp"
+description: "NXP i.MX 8M Plus — 4x Cortex-A53 + Cortex-M7, VPU, NPU, MIPI DSI/CSI"
+
+cpu:
+  cores: 4
+  type: cortex-a53
+  max_freq_mhz: 1800            # Datasheet Rev.3: max 1.8 GHz
+  m7_core: true                 # Secondary real-time Cortex-M7 @ 800 MHz
+  m7_max_freq_mhz: 800
+
+gpu:
+  type: vivante-gc7000ulx        # OpenGL ES 3.1, Vulkan 1.1
+  vpu:
+    h264_enc_max_fps: 60
+    h265_enc_max_fps: 30
+    max_res: "4K"
+
+# -------------------------------------------------------------------------
+# Clock Tree
+# Source: i.MX 8M Plus Reference Manual (IMX8MPRM Rev.3, §5 CCM)
+# -------------------------------------------------------------------------
+clocks:
+  oscillators:
+    - name: osc_24m
+      freq_mhz: 24
+      description: "Main 24 MHz crystal oscillator — root of all PLLs"
+    - name: osc_32k
+      freq_mhz: 0.032
+      description: "32 kHz RTC oscillator"
+
+  plls:
+    - name: arm_pll
+      parent: osc_24m
+      max_freq_mhz: 1800         # VCO range: 600 MHz – 1800 MHz
+      description: "ARM PLL — feeds CA53 cluster exclusively"
+      note: "Do NOT route to any peripheral; use SYSTEM_PLL1 for shared buses"
+
+    - name: sys_pll1
+      parent: osc_24m
+      max_freq_mhz: 800
+      fixed_dividers: [40, 80, 100, 133, 160, 200, 266, 400, 800]
+      description: "System PLL1 — DRAM, NoC, AXI main bus"
+
+    - name: sys_pll2
+      parent: osc_24m
+      max_freq_mhz: 1000
+      fixed_dividers: [50, 100, 125, 166, 200, 250, 333, 500, 1000]
+      description: "System PLL2 — peripherals (USB, PCIe, ENET)"
+
+    - name: sys_pll3
+      parent: osc_24m
+      max_freq_mhz: 594
+      description: "System PLL3 — HDMI, MIPI PHY"
+
+    - name: audio_pll1
+      parent: osc_24m
+      max_freq_mhz: 393
+      description: "Audio PLL1 — SAI / ESAI audio interfaces"
+
+    - name: audio_pll2
+      parent: osc_24m
+      max_freq_mhz: 361
+      description: "Audio PLL2 — alternate audio clock"
+
+    - name: video_pll1
+      parent: osc_24m
+      max_freq_mhz: 594
+      description: "Video PLL1 — MIPI DSI pixel clock, LCDIF"
+
+    - name: dram_pll
+      parent: osc_24m
+      max_freq_mhz: 1600         # LPDDR4-3200: 1600 MHz per-side
+      description: "DRAM PLL — feeds DDR PHY directly; must not be gated during DRAM access"
+
+  buses:
+    - name: arm_a53_clk
+      parent: arm_pll
+      max_freq_mhz: 1800
+    - name: noc_clk
+      parent: sys_pll1
+      max_freq_mhz: 800
+      description: "Network-on-Chip interconnect — must not exceed 800 MHz"
+    - name: ahb_clk
+      parent: sys_pll1
+      max_freq_mhz: 133
+    - name: ipg_clk
+      parent: ahb_clk
+      max_freq_mhz: 66
+    - name: dram_apb_clk
+      parent: sys_pll1
+      max_freq_mhz: 200
+    - name: usb_phy_ref
+      parent: sys_pll2
+      freq_mhz: 100
+    - name: pcie_aux
+      parent: sys_pll2
+      freq_mhz: 10
+    - name: enet_ref
+      parent: sys_pll2
+      freq_mhz: 125
+
+# -------------------------------------------------------------------------
+# Power Tree
+# Source: i.MX 8M Plus EVK Schematic + IMX8MPRM §6 Power Management
+# PMIC: PCA9450C (on EVK)
+# -------------------------------------------------------------------------
+power_tree_constraints:
+  pmic_type: PCA9450C
+  pmic_outputs:
+    # BUCK converters (DCDC)
+    - name: BUCK1          # VDD_SOC
+      type: dcdc
+      voltage_min_v: 0.75
+      voltage_max_v: 0.90
+      consumers: [vdd_soc]
+      max_current_ma: 3000
+      startup_seq: 1
+      description: "SoC core logic — 0.85V typical"
+
+    - name: BUCK2          # VDD_ARM (A53 cluster)
+      type: dcdc
+      voltage_min_v: 0.75
+      voltage_max_v: 1.00
+      consumers: [vdd_arm]
+      max_current_ma: 3000
+      startup_seq: 2
+      description: "ARM Cortex-A53 cluster — 0.9V @1.8 GHz"
+
+    - name: BUCK3          # VDD_DRAM / NVCC_DRAM
+      type: dcdc
+      voltage_min_v: 1.05
+      voltage_max_v: 1.10
+      consumers: [nvcc_dram]
+      max_current_ma: 3000
+      startup_seq: 1          # MUST be at or before BUCK1 (IMX8MP sequencing requirement)
+      description: "LPDDR4/5 DRAM supply — 1.1V; must power-up BEFORE VDD_SOC"
+
+    - name: BUCK4          # VDD_3V3
+      type: dcdc
+      voltage_min_v: 3.3
+      voltage_max_v: 3.3
+      consumers: [nvcc_sd, vdd_usb]
+      max_current_ma: 3000
+      startup_seq: 1
+      description: "3.3V rail — SDCARD, USB, Ethernet PHY"
+
+    - name: BUCK5          # VDD_1V8
+      type: dcdc
+      voltage_min_v: 1.8
+      voltage_max_v: 1.8
+      consumers: [nvcc_enet_io, nvcc_uart, nvcc_gpio, nvcc_csi]
+      max_current_ma: 3000
+      startup_seq: 2
+      description: "1.8V IO rail — UART, GPIO, ENET IO, CSI"
+
+    # LDO outputs
+    - name: LDO1           # NVCC_SNVS_1V8
+      type: ldo
+      voltage_min_v: 1.8
+      voltage_max_v: 1.8
+      consumers: [nvcc_snvs]
+      max_current_ma: 300
+      startup_seq: 1
+      description: "Always-on SNVS domain (RTC, tamper detect)"
+
+    - name: LDO2           # VCC_1V8_REF
+      type: ldo
+      voltage_min_v: 1.8
+      voltage_max_v: 1.8
+      consumers: [vdd_mipi_ref]
+      max_current_ma: 300
+      startup_seq: 3
+      description: "MIPI D-PHY reference voltage"
+
+    - name: LDO3           # VDDA_1V8
+      type: ldo
+      voltage_min_v: 1.8
+      voltage_max_v: 1.8
+      consumers: [vdda_usb]
+      max_current_ma: 300
+      startup_seq: 3
+      description: "USB PHY analog power"
+
+    - name: LDO4           # VDDA_PLL_1V8
+      type: ldo
+      voltage_min_v: 1.8
+      voltage_max_v: 1.8
+      consumers: [vdda_pll]
+      max_current_ma: 200
+      startup_seq: 2
+      description: "PLL analog supply — ALL PLLs share this rail"
+
+    - name: LDO5           # NVCC_HDMI / VDD_3V3_HDMI
+      type: ldo
+      voltage_min_v: 3.3
+      voltage_max_v: 3.3
+      consumers: [nvcc_hdmi]
+      max_current_ma: 300
+      startup_seq: 4
+      description: "HDMI PHY supply"
+
+  # Power sequencing requirements (NXP AN13486: i.MX8M Plus Power-Up Sequence)
+  sequencing_rules:
+    - rule: "NVCC_DRAM (BUCK3) must be stable BEFORE VDD_SOC (BUCK1)"
+    - rule: "VDD_SOC (BUCK1) must be stable BEFORE VDD_ARM (BUCK2)"
+    - rule: "VDD_1V8 (BUCK5) must follow VDD_SOC; IO before core in same domain"
+    - rule: "VDDA_PLL (LDO4) must be stable before any PLL is enabled"
+    - rule: "ARM_PLL max VCO output is 1800 MHz — do NOT program divider for output > 1800 MHz"
+
+# -------------------------------------------------------------------------
+# GPIO / IO banks
+# -------------------------------------------------------------------------
+gpio_banks:
+  - bank: 1
+    base: 0x30200000
+    voltage_v: 3.3
+    supply: NVCC_GPIO1_IO00..17
+  - bank: 2
+    base: 0x30210000
+    voltage_v: 3.3
+    supply: NVCC_GPIO2
+  - bank: 3
+    base: 0x30220000
+    voltage_v: 1.8
+    supply: NVCC_GPIO3
+    note: "1.8V IO bank — do not exceed 1.98V"
+  - bank: 4
+    base: 0x30230000
+    voltage_v: 1.8
+    supply: NVCC_GPIO4
+    note: "1.8V IO bank — do not exceed 1.98V"
+  - bank: 5
+    base: 0x30240000
+    voltage_v: 3.3
+    supply: NVCC_GPIO5
+
+# -------------------------------------------------------------------------
+# BGA Package: FCBGA-285, 14×14 grid (A–N rows, 1–20 cols)
+# Source: i.MX 8M Plus Data Sheet Rev.3 §4 Package / Pin Descriptions
+# -------------------------------------------------------------------------
+bga:
+  package: FCBGA-285
+  grid:
+    rows: [A, B, C, D, E, F, G, H, J, K, L, M, N]
+    cols: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+  pins:
+    # ---- Power / Ground rails (Row A) ----
+    - pin: A1
+      name: VDD_SOC
+      type: power
+      supply: BUCK1
+    - pin: A2
+      name: VDD_SOC
+      type: power
+      supply: BUCK1
+    - pin: A3
+      name: VDD_ARM
+      type: power
+      supply: BUCK2
+    - pin: A4
+      name: VDD_ARM
+      type: power
+      supply: BUCK2
+    - pin: A5
+      name: NVCC_DRAM
+      type: power
+      supply: BUCK3
+    - pin: A6
+      name: NVCC_DRAM
+      type: power
+      supply: BUCK3
+    - pin: A7
+      name: GND
+      type: ground
+    - pin: A8
+      name: GND
+      type: ground
+    - pin: A9
+      name: VDD_3V3
+      type: power
+      supply: BUCK4
+    - pin: A10
+      name: VDD_1V8
+      type: power
+      supply: BUCK5
+    - pin: A11
+      name: VDDA_PLL
+      type: power
+      supply: LDO4
+    - pin: A12
+      name: GND
+      type: ground
+    - pin: A13
+      name: GND
+      type: ground
+    - pin: A14
+      name: NVCC_SNVS
+      type: power
+      supply: LDO1
+
+    # ---- ARM A53 cluster + M7 (Row B) ----
+    - pin: B1
+      name: GND
+      type: ground
+    - pin: B2
+      name: VDD_ARM
+      type: power
+      supply: BUCK2
+    - pin: B3
+      name: GND
+      type: ground
+    - pin: B4
+      name: VDD_SOC
+      type: power
+      supply: BUCK1
+
+    # ---- DDR4/LPDDR4 interface (Row C) ----
+    - pin: C1
+      name: DDR_D0
+      type: ddr
+      function: LPDDR4_DQ0
+    - pin: C2
+      name: DDR_D1
+      type: ddr
+      function: LPDDR4_DQ1
+    - pin: C3
+      name: DDR_D2
+      type: ddr
+      function: LPDDR4_DQ2
+    - pin: C4
+      name: DDR_D3
+      type: ddr
+      function: LPDDR4_DQ3
+    - pin: C5
+      name: DDR_D4
+      type: ddr
+      function: LPDDR4_DQ4
+    - pin: C6
+      name: DDR_D5
+      type: ddr
+      function: LPDDR4_DQ5
+    - pin: C7
+      name: DDR_D6
+      type: ddr
+      function: LPDDR4_DQ6
+    - pin: C8
+      name: DDR_D7
+      type: ddr
+      function: LPDDR4_DQ7
+    - pin: C9
+      name: DDR_DQS0_P
+      type: ddr
+      function: LPDDR4_DQS0
+    - pin: C10
+      name: DDR_DQS0_N
+      type: ddr
+      function: LPDDR4_DQS0_N
+    - pin: C11
+      name: DDR_A0
+      type: ddr
+      function: LPDDR4_CA0
+    - pin: C12
+      name: DDR_A1
+      type: ddr
+      function: LPDDR4_CA1
+    - pin: C13
+      name: DDR_CLK_P
+      type: ddr
+      function: LPDDR4_CK
+    - pin: C14
+      name: DDR_CLK_N
+      type: ddr
+      function: LPDDR4_CK_N
+
+    # ---- UART / I2C / SPI (Row D) ----
+    - pin: D1
+      name: UART1_TXD
+      type: io
+      function: uart1_tx
+      supply: NVCC_GPIO5
+    - pin: D2
+      name: UART1_RXD
+      type: io
+      function: uart1_rx
+      supply: NVCC_GPIO5
+    - pin: D3
+      name: UART2_TXD
+      type: io
+      function: uart2_tx
+      supply: NVCC_GPIO5
+    - pin: D4
+      name: UART2_RXD
+      type: io
+      function: uart2_rx
+      supply: NVCC_GPIO5
+    - pin: D5
+      name: I2C1_SCL
+      type: io
+      function: i2c1_scl
+      supply: NVCC_GPIO5
+    - pin: D6
+      name: I2C1_SDA
+      type: io
+      function: i2c1_sda
+      supply: NVCC_GPIO5
+    - pin: D7
+      name: I2C2_SCL
+      type: io
+      function: i2c2_scl
+      supply: NVCC_GPIO5
+    - pin: D8
+      name: I2C2_SDA
+      type: io
+      function: i2c2_sda
+      supply: NVCC_GPIO5
+    - pin: D9
+      name: ECSPI1_MOSI
+      type: io
+      function: spi1_mosi
+      supply: NVCC_GPIO5
+    - pin: D10
+      name: ECSPI1_MISO
+      type: io
+      function: spi1_miso
+      supply: NVCC_GPIO5
+    - pin: D11
+      name: ECSPI1_SCLK
+      type: io
+      function: spi1_clk
+      supply: NVCC_GPIO5
+    - pin: D12
+      name: ECSPI1_SS0
+      type: io
+      function: spi1_cs0
+      supply: NVCC_GPIO5
+
+    # ---- USB3 / PCIe (Row E) ----
+    - pin: E1
+      name: USB1_DP
+      type: hs_io
+      function: usb1_dp
+    - pin: E2
+      name: USB1_DN
+      type: hs_io
+      function: usb1_dn
+    - pin: E3
+      name: USB2_DP
+      type: hs_io
+      function: usb2_dp
+    - pin: E4
+      name: USB2_DN
+      type: hs_io
+      function: usb2_dn
+    - pin: E5
+      name: PCIE_TX0_P
+      type: hs_io
+      function: pcie_tx0_p
+    - pin: E6
+      name: PCIE_TX0_N
+      type: hs_io
+      function: pcie_tx0_n
+    - pin: E7
+      name: PCIE_RX0_P
+      type: hs_io
+      function: pcie_rx0_p
+    - pin: E8
+      name: PCIE_RX0_N
+      type: hs_io
+      function: pcie_rx0_n
+    - pin: E9
+      name: PCIE_CLK_REQ
+      type: io
+      function: pcie_clkreq_n
+    - pin: E10
+      name: PCIE_WAKE
+      type: io
+      function: pcie_wake_n
+
+    # ---- Ethernet RGMII (Row F) ----
+    - pin: F1
+      name: ENET_TXD0
+      type: io
+      function: enet1_tx_data0
+      supply: NVCC_ENET_IO
+    - pin: F2
+      name: ENET_TXD1
+      type: io
+      function: enet1_tx_data1
+      supply: NVCC_ENET_IO
+    - pin: F3
+      name: ENET_TXD2
+      type: io
+      function: enet1_tx_data2
+      supply: NVCC_ENET_IO
+    - pin: F4
+      name: ENET_TXD3
+      type: io
+      function: enet1_tx_data3
+      supply: NVCC_ENET_IO
+    - pin: F5
+      name: ENET_RXD0
+      type: io
+      function: enet1_rx_data0
+      supply: NVCC_ENET_IO
+    - pin: F6
+      name: ENET_TX_CLK
+      type: io
+      function: enet1_rgmii_txc
+      supply: NVCC_ENET_IO
+    - pin: F7
+      name: ENET_MDC
+      type: io
+      function: enet1_mdc
+      supply: NVCC_ENET_IO
+    - pin: F8
+      name: ENET_MDIO
+      type: io
+      function: enet1_mdio
+      supply: NVCC_ENET_IO
+
+    # ---- MIPI CSI / DSI (Row G) ----
+    - pin: G1
+      name: MIPI_CSI0_D0_P
+      type: hs_io
+      function: mipi_csi0_data0_p
+    - pin: G2
+      name: MIPI_CSI0_D0_N
+      type: hs_io
+      function: mipi_csi0_data0_n
+    - pin: G3
+      name: MIPI_CSI0_CLK_P
+      type: hs_io
+      function: mipi_csi0_clk_p
+    - pin: G4
+      name: MIPI_CSI0_CLK_N
+      type: hs_io
+      function: mipi_csi0_clk_n
+    - pin: G5
+      name: MIPI_DSI0_D0_P
+      type: hs_io
+      function: mipi_dsi0_data0_p
+    - pin: G6
+      name: MIPI_DSI0_D0_N
+      type: hs_io
+      function: mipi_dsi0_data0_n
+    - pin: G7
+      name: MIPI_DSI0_CLK_P
+      type: hs_io
+      function: mipi_dsi0_clk_p
+    - pin: G8
+      name: MIPI_DSI0_CLK_N
+      type: hs_io
+      function: mipi_dsi0_clk_n
+
+    # ---- Audio SAI (Row H) ----
+    - pin: H1
+      name: SAI1_TXFS
+      type: audio
+      function: sai1_tx_sync
+      supply: NVCC_GPIO4
+    - pin: H2
+      name: SAI1_TXC
+      type: audio
+      function: sai1_tx_bclk
+      supply: NVCC_GPIO4
+    - pin: H3
+      name: SAI1_TXD0
+      type: audio
+      function: sai1_tx_data0
+      supply: NVCC_GPIO4
+    - pin: H4
+      name: SAI1_RXD0
+      type: audio
+      function: sai1_rx_data0
+      supply: NVCC_GPIO4
+    - pin: H5
+      name: SAI1_MCLK
+      type: audio
+      function: sai1_mclk
+      supply: NVCC_GPIO4
+
+    # ---- JTAG / Debug (Row J) ----
+    - pin: J1
+      name: JTAG_TCK
+      type: jtag
+      function: jtag_tck
+    - pin: J2
+      name: JTAG_TMS
+      type: jtag
+      function: jtag_tms
+    - pin: J3
+      name: JTAG_TDI
+      type: jtag
+      function: jtag_tdi
+    - pin: J4
+      name: JTAG_TDO
+      type: jtag
+      function: jtag_tdo
+    - pin: J5
+      name: JTAG_TRST
+      type: jtag
+      function: jtag_trst_b
+
+    # ---- eMMC / SD (Row K) ----
+    - pin: K1
+      name: SD1_CLK
+      type: io
+      function: usdhc1_clk
+      supply: NVCC_SD1
+    - pin: K2
+      name: SD1_CMD
+      type: io
+      function: usdhc1_cmd
+      supply: NVCC_SD1
+    - pin: K3
+      name: SD1_D0
+      type: io
+      function: usdhc1_data0
+      supply: NVCC_SD1
+    - pin: K4
+      name: SD1_D1
+      type: io
+      function: usdhc1_data1
+      supply: NVCC_SD1
+    - pin: K5
+      name: SD1_D2
+      type: io
+      function: usdhc1_data2
+      supply: NVCC_SD1
+    - pin: K6
+      name: SD1_D3
+      type: io
+      function: usdhc1_data3
+      supply: NVCC_SD1
+    - pin: K7
+      name: EMMC_CLK
+      type: io
+      function: usdhc3_clk
+      supply: NVCC_USDHC3
+    - pin: K8
+      name: EMMC_CMD
+      type: io
+      function: usdhc3_cmd
+      supply: NVCC_USDHC3
+    - pin: K9
+      name: EMMC_D0
+      type: io
+      function: usdhc3_data0
+      supply: NVCC_USDHC3
+
+    # ---- NC / Reserved (Row N) ----
+    - pin: N1
+      name: NC
+      type: nc
+    - pin: N2
+      name: NC
+      type: nc
+    - pin: N3
+      name: NC
+      type: nc
+    - pin: N4
+      name: TESTMODE
+      type: nc
+      description: "Pull-down required; must not be driven high in production"
+
+    # ---- Bottom power / ground row (Row M) ----
+    - pin: M1
+      name: GND
+      type: ground
+    - pin: M2
+      name: GND
+      type: ground
+    - pin: M3
+      name: VDD_SOC
+      type: power
+      supply: BUCK1
+    - pin: M4
+      name: NVCC_DRAM
+      type: power
+      supply: BUCK3
+    - pin: M5
+      name: VDD_1V8
+      type: power
+      supply: BUCK5
+    - pin: M6
+      name: VDD_3V3
+      type: power
+      supply: BUCK4
+    - pin: M7
+      name: GND
+      type: ground
+    - pin: M8
+      name: GND
+      type: ground
