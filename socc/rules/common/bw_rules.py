@@ -145,7 +145,10 @@ class BW101DDRBandwidthSaturation(BaseRule):
             dev_lower = dev_name.lower()
 
             for kw, label, peak_mb in _BW_CONSUMERS:
-                if kw in compat or kw in dev_lower:
+                # Match on compatible string only — never on node name, which
+                # would cause pinctrl subnodes (e.g. sdmmc-bus4, sdmmc-clk)
+                # to be counted as independent bandwidth consumers.
+                if kw in compat:
                     total_bw += peak_mb
                     active_consumers.append((dev_name, label, peak_mb))
                     break  # only count once per device

@@ -212,19 +212,39 @@ class CK106ClockSourceContention(BaseRule):
     def check(self, model: SoC, context: CheckContext) -> List[Violation]:
         """Check for multiple devices contending on a single clock source."""
         violations: List[Violation] = []
-        
+
+        # Build a set of node names that are fixed-clock sources.
+        # fixed-clocks (xin24m, xin32k, etc.) are reference oscillators and
+        # are legitimately shared by all peripherals — not a contention issue.
+        fixed_clock_labels: set = set()
+        for dev_name, dev_node in model.devices.items():
+            compat = dev_node.properties.get("compatible", "")
+            if isinstance(compat, (list, tuple)):
+                compat = " ".join(str(c) for c in compat)
+            if "fixed-clock" in str(compat).lower():
+                fixed_clock_labels.add(dev_name)
+                fixed_clock_labels.add(f"&{dev_name}")
+
         # count device usage per clock
-        clock_usage = {}
-        
+        clock_usage: dict = {}
         for device_name, clock_list in model.device_clocks.items():
             for clock_name in clock_list:
                 if clock_name not in clock_usage:
                     clock_usage[clock_name] = []
                 clock_usage[clock_name].append(device_name)
-        
-        # find clocks used by 3+ devices
+
+        # find clocks used by 3+ devices — but skip fixed-clock sources
         for clock_name, devices in clock_usage.items():
-            # warn when 3+ devices share a single clock
+            # strip leading '&' for label-based lookup
+            label = clock_name.lstrip("&")
+            if clock_name in fixed_clock_labels or label in fixed_clock_labels:
+                continue  # reference oscillator, sharing is expected
+            # Pure-integer clock names are either clock-cell indices or
+            # pre-resolved phandle numbers.  When shared by 50+ devices the
+            # value is almost certainly the phandle of xin24m or a similar
+            # system-wide reference clock — not true contention.
+            if clock_name.lstrip("-").isdigit() and len(devices) >= 50:
+                continue
             if len(devices) >= 3:
                 violations.append(
                     self._create_violation(
@@ -235,7 +255,7 @@ class CK106ClockSourceContention(BaseRule):
                         affected_nodes=[clock_name] + devices,
                     )
                 )
-        
+
         return violations
 
 
