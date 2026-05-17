@@ -65,7 +65,8 @@ class Violation:
     affected_nodes: List[str] = field(default_factory=list)
     rule_name: str = ""
     reference: str = ""
-    line: Optional[int] = None  # source line number in the DTS file, if known
+    line: Optional[int] = None        # source line number in the DTS file
+    source_file: Optional[str] = None # path to the DTS source file (for diagnostics)
 
     def __str__(self) -> str:
         """Human-readable single-violation display."""
@@ -94,6 +95,7 @@ class Violation:
             "rule_name": self.rule_name,
             "reference": self.reference,
             "line": self.line,
+            "source_file": self.source_file,
         }
 
 @dataclass

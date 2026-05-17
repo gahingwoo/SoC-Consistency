@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 from pathlib import Path
 from typing import Optional
 
@@ -30,10 +31,49 @@ ALL_SOC_CHOICES = ROCKCHIP_SOCS + ALLWINNER_SOCS + AMLOGIC_SOCS + QUALCOMM_SOCS 
 # Convenience re-exports used in command modules
 __all__ = [
     "ROCKCHIP_SOCS", "ALLWINNER_SOCS", "AMLOGIC_SOCS", "QUALCOMM_SOCS", "NXP_SOCS",
-    "ALL_SOC_CHOICES", "build_registry", "auto_detect_soc", "severity_tag", "echo",
-    "load_config", "filter_by_severity", "SAMPLE_CONFIG",
-    "build_sample_model", "parse_dts_file", "Checker", "Path", "Optional", "click",
+    "ALL_SOC_CHOICES", "FuzzySoCType", "build_registry", "auto_detect_soc",
+    "severity_tag", "echo", "load_config", "filter_by_severity", "SAMPLE_CONFIG",
+    "build_sample_model", "parse_dts_file", "parse_dts_cached",
+    "Checker", "Path", "Optional", "click",
 ]
+
+
+# ── Fuzzy SoC name parameter type ────────────────────────────────────────────
+
+class FuzzySoCType(click.ParamType):
+    """Click parameter type that accepts SoC names with fuzzy-match suggestions.
+
+    If the user types an unrecognised name, the error message lists the closest
+    matches (via :func:`difflib.get_close_matches`) instead of dumping the full
+    ~50-item list of valid choices.
+    """
+
+    name = "SOC"
+
+    def __init__(self, choices: list):
+        self._choices = choices
+
+    def convert(self, value, param, ctx):
+        if value in self._choices:
+            return value
+        # Case-insensitive check
+        low = value.lower()
+        for c in self._choices:
+            if c.lower() == low:
+                return c
+        # Fuzzy suggestions
+        suggestions = difflib.get_close_matches(low, self._choices, n=4, cutoff=0.5)
+        if suggestions:
+            hint = "  Did you mean: " + ", ".join(
+                click.style(s, fg="yellow", bold=True) for s in suggestions
+            ) + "?"
+        else:
+            hint = f"  Run 'socc check --help' to see all supported SoC names."
+        self.fail(
+            f"Unknown SoC {value!r}.\n{hint}",
+            param,
+            ctx,
+        )
 
 
 def build_registry() -> RuleRegistry:
@@ -132,3 +172,32 @@ def severity_tag(severity: str, color: Optional[bool]) -> str:
 def echo(msg: str, color: Optional[bool] = None) -> None:
     """Print a status message."""
     click.echo(msg)
+
+
+# ── Cached DTS parsing ───────────────────────────────────────────────────────
+
+def parse_dts_cached(dts_file: str, soc_name: str):
+    """Parse *dts_file* and cache the result.  Returns the :class:`~socc.model.SoC` model.
+
+    On a cache hit the parse step is skipped entirely; on a miss the result is
+    serialised to ``~/.cache/socc/`` for future calls.  Cache misses are
+    transparent — failures never propagate to the caller.
+    """
+    from socc.cache import get_cached_model, set_cached_model
+    model = get_cached_model(dts_file, soc_name)
+    if model is not None:
+        return model
+    model = parse_dts_file(dts_file, soc_name)
+    set_cached_model(dts_file, soc_name, model)
+    return model
+
+
+# ── Rule-code fuzzy matcher ──────────────────────────────────────────────────
+
+def suggest_rule_codes(bad_code: str, registry) -> str:
+    """Return a human-readable 'did you mean' string for an unknown rule code."""
+    known = [r.code for r in registry.list_all_rules()]
+    matches = difflib.get_close_matches(bad_code.upper(), known, n=3, cutoff=0.5)
+    if matches:
+        return "Did you mean: " + ", ".join(matches) + "?"
+    return f"Run 'socc rules' to see all valid rule codes."

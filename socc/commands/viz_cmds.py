@@ -5,8 +5,8 @@ from __future__ import annotations
 import click
 
 from socc.commands._shared import (
-    ALL_SOC_CHOICES, build_registry, auto_detect_soc,
-    build_sample_model, parse_dts_file, Checker, Path, Optional,
+    ALL_SOC_CHOICES, FuzzySoCType, build_registry, auto_detect_soc,
+    build_sample_model, parse_dts_file, parse_dts_cached, Checker, Path, Optional,
 )
 
 
@@ -19,7 +19,7 @@ def viz_group():
 
 @viz_group.command("topology")
 @click.argument("dts_file", type=click.Path(exists=True), required=False)
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("-o", "--output", default=None, metavar="FILE")
 @click.option("--demo", is_flag=True, help="Use built-in sample model.")
 @click.option("--no-open", is_flag=True,
@@ -87,7 +87,7 @@ def viz_topology(dts_file: Optional[str], soc: Optional[str], output: Optional[s
 
 @viz_group.command("pinmap")
 @click.argument("dts_file", type=click.Path(exists=True), required=False)
-@click.option("--soc", "soc_name", type=click.Choice(ALL_SOC_CHOICES),
+@click.option("--soc", "soc_name", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC",
               default=None, required=True,
               help="SoC identifier (must have a 'bga:' section in its YAML).")
 @click.option("-o", "--output", default=None, metavar="FILE")
@@ -123,7 +123,7 @@ def viz_pinmap(dts_file: Optional[str], soc_name: str, output: Optional[str], no
 
 @viz_group.command("power-seq")
 @click.argument("dts_file", type=click.Path(exists=True), required=False)
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--color/--no-color", default=None)
 @click.option("--demo", is_flag=True, help="Use built-in sample model.")
 def viz_power_seq(dts_file: Optional[str], soc: Optional[str],

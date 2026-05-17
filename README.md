@@ -37,6 +37,7 @@ $ socc check board.dts --soc rk3588
   - [socc socdef — constraint files](#socc-socdef--constraint-files)
 - [Supported SoCs](#supported-socs)
 - [CI / CD integration](#ci--cd-integration)
+- [What's new in v1.2](#whats-new-in-v12)
 - [Upgrading from pre-1.1](#upgrading-from-pre-11)
 - [Rules reference](#rules-reference)
 - [Architecture](#architecture)
@@ -408,6 +409,101 @@ hidden aliases).  No scripts need to be updated.
 | `socc migrate` | `socc sim migrate` |
 | `socc validate-socdef` | `socc socdef validate` |
 | `socc check-socdef` | `socc socdef check` |
+
+---
+
+## What's new in v1.2
+
+### Rust-style diagnostics
+
+Violation output now looks like a Rust compiler message, with a source-code
+snippet and caret underline pointing to the exact DTS line:
+
+```
+error[GP-001]: GPIO pin conflict at gpio3/pin8
+ --> arch/arm64/boot/dts/rockchip/rk3588-foo.dts:142:5
+141 |     pinctrl-0 = <&uart2m1_xfer>;
+142 |     pinctrl-0 = <&spi0_cs0>;
+    |     ^^^^^^^^^^ Pin already claimed by uart2
+    = hint: Remove the duplicate pinctrl-0 assignment.
+```
+
+No extra dependencies — uses only `click.style` for ANSI color.
+
+### Fuzzy SoC name matching
+
+Typos in `--soc` now produce helpful suggestions instead of a wall of choices:
+
+```
+$ socc check foo.dts --soc rk3589
+Error: Unknown SoC 'rk3589'. Did you mean: rk3588, rk3588s, rk3576?
+```
+
+### Granular exit codes
+
+`socc check` and `socc diff` now return precise exit codes for use in CI:
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No violations |
+| `1`  | Info-level findings only |
+| `2`  | At least one warning |
+| `3`  | At least one error |
+
+### Subsystem breakdown
+
+The summary line now includes a per-domain count:
+
+```
+Subsystems: [GPIO:23  Power:12  Clock:8  IRQ:3]
+Summary: 1 error(s), 12 warning(s), 23 info
+```
+
+### Watch mode
+
+```bash
+socc check rk3588-board.dts --soc rk3588 --watch
+```
+
+Re-runs automatically whenever the file changes.  Press Ctrl-C to stop.
+
+### GitHub Actions annotations
+
+```bash
+socc check rk3588-board.dts --soc rk3588 --format annotations
+# → ::error file=...,line=...,title=[GP-001]::GPIO pin conflict
+```
+
+### `socc diff --ci`
+
+```bash
+socc diff baseline.dts pr.dts --soc rk3588 --ci
+```
+
+In `--ci` mode the command exits non-zero on *any* regression (not just errors),
+ideal for pull-request gates.
+
+### Parse cache
+
+DTS files are cached in `~/.cache/socc/` after the first parse.  Subsequent
+runs with the same file are significantly faster.  Pass `--no-cache` to bypass.
+
+```bash
+socc check rk3588-board.dts --soc rk3588 --no-cache
+```
+
+### IPython shell
+
+`socc sim shell` now launches IPython when it is installed, giving you a rich
+interactive environment with tab-completion, history, and a pre-populated
+namespace (`model`, `power`, `clock`, `devices`, `check()`, `pins`).
+
+```bash
+pip install ipython    # one-time
+socc sim shell --demo
+```
+
+Falls back to the built-in REPL when IPython is not available.
 
 ---
 

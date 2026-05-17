@@ -5,8 +5,8 @@ from __future__ import annotations
 import click
 
 from socc.commands._shared import (
-    ALL_SOC_CHOICES, build_registry, auto_detect_soc,
-    build_sample_model, parse_dts_file, Path, Optional,
+    ALL_SOC_CHOICES, FuzzySoCType, build_registry, auto_detect_soc,
+    build_sample_model, parse_dts_file, parse_dts_cached, Checker, Path, Optional,
 )
 
 
@@ -20,7 +20,7 @@ def sim_group():
 @sim_group.command("failure")
 @click.argument("node_name")
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--color/--no-color", default=None)
 def sim_failure(node_name: str, dts_file: str, soc: Optional[str], color: Optional[bool]):
     """Simulate a hardware failure and compute FMEA blast radius.
@@ -47,7 +47,7 @@ def sim_failure(node_name: str, dts_file: str, soc: Optional[str], color: Option
 
 @sim_group.command("smoke")
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--color/--no-color", default=None)
 @click.option("-o", "--output", default=None, metavar="FILE")
 def sim_smoke(dts_file: str, soc: Optional[str], color: Optional[bool], output: Optional[str]):
@@ -84,7 +84,7 @@ def sim_smoke(dts_file: str, soc: Optional[str], color: Optional[bool], output: 
 
 @sim_group.command("shell")
 @click.argument("dts_file", type=click.Path(exists=True), required=False)
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--demo", is_flag=True, help="Use built-in sample model.")
 def sim_shell(dts_file: Optional[str], soc: Optional[str], demo: bool):
     """Interactive power/clock state machine simulator.
@@ -103,18 +103,45 @@ def sim_shell(dts_file: Optional[str], soc: Optional[str], demo: bool):
             raise SystemExit(1)
         soc_name = soc if (soc and soc != "auto") else auto_detect_soc(Path(dts_file).name)
         try:
-            model = parse_dts_file(dts_file, soc_name)
+            model = parse_dts_cached(dts_file, soc_name)
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
             raise SystemExit(1)
-    PowerSimulator(model, soc_name).run()
+
+    banner = (
+        f"\n[socc shell] SoC model loaded: {soc_name!r}\n"
+        "  model   → full SoC model        power   → power tree\n"
+        "  clock   → clock tree            devices → IRNode dict\n"
+        "  pins    → pinmux_config dict    check() → re-run rules\n"
+        "\nType quit() or Ctrl-D to exit.\n"
+    )
+
+    # Try IPython first; fall back to PowerSimulator REPL
+    try:
+        import IPython  # noqa: F401
+        ns = {
+            "model":   model,
+            "soc":     soc_name,
+            "power":   model.power_tree,
+            "clock":   model.clock_tree,
+            "devices": model.devices,
+            "pins":    model.pinmux_config,
+            "check":   lambda: Checker(build_registry()).check(model, soc_name),
+        }
+        IPython.start_ipython(argv=[], user_ns=ns, banner1=banner, display_banner=True)
+    except ImportError:
+        click.echo(banner)
+        click.echo(click.style(
+            "[INFO] Install IPython for an enhanced shell: pip install ipython",
+            fg="cyan"))
+        PowerSimulator(model, soc_name).run()
 
 
 # ── sim live-check ────────────────────────────────────────────────────────────
 
 @sim_group.command("live-check")
 @click.argument("target")
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default="auto", show_default=True)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default="auto", show_default=True)
 @click.option("--format", "output_format", type=click.Choice(["text", "json", "sarif"]),
               default="text", show_default=True)
 @click.option("--min-severity", type=click.Choice(["error", "warning", "info"]),
@@ -195,7 +222,7 @@ def sim_live_probe(dts_file: str, svd: str, simulate: bool, jtag_host: str,
 @click.argument("node_path")
 @click.argument("base_dts", type=click.Path(exists=True))
 @click.argument("overlays", type=click.Path(exists=True), nargs=-1)
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--color/--no-color", default=None)
 def sim_trace(node_path: str, base_dts: str, overlays: tuple,
               soc: Optional[str], color: Optional[bool]):
@@ -220,7 +247,7 @@ def sim_trace(node_path: str, base_dts: str, overlays: tuple,
               metavar="OLD_DTS", help="Source board DTS (old SoC).")
 @click.option("--to", "to_dts", type=click.Path(exists=True), default=None,
               metavar="NEW_BASE_DTS", help="Target SoC base DTS (optional).")
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None,
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None,
               help="New target SoC name.")
 @click.option("-o", "--output", default=None, metavar="FILE")
 @click.option("--color/--no-color", default=None)

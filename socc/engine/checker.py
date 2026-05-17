@@ -1,13 +1,41 @@
 """SoC consistency checking engine."""
 
 import json
-from typing import List, Optional
+from collections import defaultdict
+from typing import Dict, List, Optional
 
 import click
 
 from socc.model import SoC, Violation
 
 from socc.rules import RuleRegistry, CheckContext
+
+# ── Rule-code prefix → human-readable subsystem name ─────────────────────────
+_DOMAIN_MAP: Dict[str, str] = {
+    "PD":  "Power",
+    "CK":  "Clock",
+    "GP":  "GPIO",
+    "MM":  "Memory",
+    "BND": "Bounds",
+    "IRQ": "IRQ",
+    "DG":  "DepGraph",
+    "TH":  "Thermal",
+    "BW":  "Bandwidth",
+    "SEC": "Security",
+    "NET": "Netlist",
+    "KNL": "Kernel",
+    "BOM": "BOM",
+    "OVL": "Overlay",
+    "BUS": "Bus",
+    "AMP": "AMP",
+    "MTX": "Matrix",
+}
+
+
+def _rule_domain(code: str) -> str:
+    """Infer a human-readable subsystem name from a rule code prefix."""
+    prefix = code.split("-")[0].upper()
+    return _DOMAIN_MAP.get(prefix, "Other")
 
 
 class Checker:
@@ -17,11 +45,26 @@ class Checker:
         """Initialize the checker with a rule registry."""
         self.registry = registry
 
-    def check(self, model: SoC, soc_name: str, extra_metadata: Optional[dict] = None) -> List[Violation]:
-        """Run all rules against *model* and return sorted violations."""
+    def check(
+        self,
+        model: SoC,
+        soc_name: str,
+        extra_metadata: Optional[dict] = None,
+        source_file: Optional[str] = None,
+    ) -> List[Violation]:
+        """Run all rules against *model* and return sorted violations.
+
+        If *source_file* is provided every returned :class:`~socc.model.Violation`
+        will have its ``source_file`` attribute set so that the caller can render
+        Rust-style diagnostics.
+        """
         metadata = dict(extra_metadata) if extra_metadata else {}
-        context = CheckContext(soc_name=soc_name, metadata=metadata)
+        context  = CheckContext(soc_name=soc_name, metadata=metadata)
         violations = self.registry.execute_all(model, soc_name, context)
+        if source_file:
+            for v in violations:
+                if v.source_file is None:
+                    v.source_file = source_file
         return violations
 
     def generate_report(
@@ -29,13 +72,16 @@ class Checker:
         violations: List[Violation],
         output_format: str = "text",
         color: Optional[bool] = None,
+        source_file: Optional[str] = None,
     ) -> str:
         """Generate a formatted report for *violations*.
 
         Args:
-            violations: List of Violation objects.
-            output_format: "text", "json", or "sarif".
-            color: Force ANSI color on (True), off (False), or auto-detect (None).
+            violations:    List of Violation objects.
+            output_format: "text", "json", "sarif", or "annotations".
+            color:         Force ANSI color on (True), off (False), or auto (None).
+            source_file:   DTS source path, used for Rust-style diagnostics in
+                           text format.
 
         Returns:
             Formatted report string.
@@ -44,6 +90,8 @@ class Checker:
             return self._generate_json_report(violations)
         elif output_format == "sarif":
             return self._generate_sarif_report(violations)
+        elif output_format == "annotations":
+            return self._generate_annotations_report(violations)
         else:
             return self._generate_text_report(violations, color=color)
 
@@ -87,9 +135,9 @@ class Checker:
         lines.append(f"\nFound {len(violations)} violation(s):\n")
 
         # group by severity
-        errors = [v for v in violations if v.severity == "error"]
+        errors   = [v for v in violations if v.severity == "error"]
         warnings = [v for v in violations if v.severity == "warning"]
-        infos = [v for v in violations if v.severity == "info"]
+        infos    = [v for v in violations if v.severity == "info"]
 
         def _section(header: str, items: list, fg: str) -> None:
             if not items:
@@ -97,14 +145,39 @@ class Checker:
             lines.append(self._styled(header, color, fg=fg, bold=True))
             lines.append("-" * 80)
             for v in items:
-                tag = self._sev_label(v.severity, color)
-                lines.append(f"{tag} [{v.code}] {v.message}")
+                # ── Rust-style header ─────────────────────────────────────
+                try:
+                    from socc.diagnostics import render_diagnostic_header, render_source_snippet
+                    lines.append(render_diagnostic_header(
+                        v.code, v.message, color=color, severity=v.severity))
+                except ImportError:
+                    tag = self._sev_label(v.severity, color)
+                    lines.append(f"{tag} [{v.code}] {v.message}")
+
+                # ── location line ─────────────────────────────────────────
                 if v.location:
-                    lines.append(f"         Location : {v.location}" +
-                                 (f":{v.line}" if v.line else ""))
+                    loc = v.location + (f":{v.line}" if v.line else "")
+                    lines.append(f"         Location : {loc}")
+
+                # ── source snippet ────────────────────────────────────────
+                sf = v.source_file
+                if sf and v.line:
+                    try:
+                        from socc.diagnostics import render_source_snippet
+                        snippet = render_source_snippet(
+                            sf, v.line, color=color, severity=v.severity,
+                            hint=v.suggestion.splitlines()[0] if v.suggestion else "",
+                        )
+                        if snippet:
+                            lines.append(snippet)
+                    except ImportError:
+                        pass
+
                 if v.impact:
                     lines.append(f"         Impact   : {v.impact}")
-                if v.suggestion:
+                if v.suggestion and not (v.source_file and v.line):
+                    # Only print Fix separately when there is no snippet
+                    # (snippet already shows the hint inline)
                     lines.append(f"         Fix      : {v.suggestion}")
                 lines.append("")
 
@@ -113,9 +186,22 @@ class Checker:
         _section(f"\nInfo ({len(infos)}):", infos, "cyan")
 
         lines.append("=" * 80)
-        err_str = self._styled(f"{len(errors)} error(s)", color, fg="red", bold=True)
+
+        # ── per-subsystem breakdown ───────────────────────────────────────────
+        domain_counts: Dict[str, int] = defaultdict(int)
+        for v in violations:
+            domain_counts[_rule_domain(v.code)] += 1
+        if domain_counts:
+            domain_parts = "  ".join(
+                f"{d}:{n}"
+                for d, n in sorted(domain_counts.items(), key=lambda x: -x[1])
+            )
+            breakdown = self._styled(f"[{domain_parts}]", color, fg="white", bold=False)
+            lines.append(f"\n  Subsystems: {breakdown}")
+
+        err_str  = self._styled(f"{len(errors)} error(s)",   color, fg="red",    bold=True)
         warn_str = self._styled(f"{len(warnings)} warning(s)", color, fg="yellow")
-        info_str = self._styled(f"{len(infos)} info", color, fg="cyan")
+        info_str = self._styled(f"{len(infos)} info",         color, fg="cyan")
         lines.append(f"\nSummary: {err_str}, {warn_str}, {info_str}")
         lines.append("=" * 80)
 
@@ -188,3 +274,32 @@ class Checker:
             ],
         }
         return json.dumps(sarif, indent=2)
+
+    def _generate_annotations_report(self, violations: List[Violation]) -> str:
+        """Generate GitHub Actions workflow-command annotations.
+
+        Each line uses the ``::error`` / ``::warning`` / ``::notice`` syntax so
+        that GitHub renders violations directly on the diff of a pull request
+        without requiring a SARIF upload step.
+
+        See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
+        """
+        _level_map = {
+            "error":   "error",
+            "warning": "warning",
+            "info":    "notice",
+        }
+        output_lines = []
+        for v in violations:
+            level = _level_map.get(v.severity, "notice")
+            # Prefer source_file for the file attribute; fall back to location
+            file_attr = v.source_file or v.location or "unknown"
+            parts = [f"file={file_attr}"]
+            if v.line:
+                parts.append(f"line={v.line}")
+            parts.append(f"title=[{v.code}] {v.rule_name or 'socc'}")
+            attrs = ",".join(parts)
+            # Newlines in the message would break the annotation format
+            msg = v.message.replace("\n", " ")
+            output_lines.append(f"::{level} {attrs}::{msg}")
+        return "\n".join(output_lines)

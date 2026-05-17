@@ -5,8 +5,8 @@ from __future__ import annotations
 import click
 
 from socc.commands._shared import (
-    ALL_SOC_CHOICES, build_registry, auto_detect_soc,
-    parse_dts_file, Checker, Path, Optional,
+    ALL_SOC_CHOICES, FuzzySoCType, build_registry, auto_detect_soc,
+    parse_dts_file, parse_dts_cached, Checker, Path, Optional,
 )
 
 
@@ -21,7 +21,7 @@ def audit_group():
 @click.argument("dts_file", type=click.Path(exists=True))
 @click.option("--target", type=click.Choice(["mainline"]), default="mainline",
               show_default=True, help="Target kernel tree to audit against.")
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None,
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None,
               help="Target SoC name.")
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]),
               default="text", show_default=True)
@@ -93,7 +93,7 @@ def audit_bindings(dts_file: str, target: str, soc: Optional[str],
 @audit_group.command("bom")
 @click.argument("dts_file", type=click.Path(exists=True))
 @click.argument("bom_csv", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--format", "output_format", type=click.Choice(["text", "json"]),
               default="text", show_default=True)
 @click.option("--color/--no-color", default=None)
@@ -170,7 +170,7 @@ def audit_kernel(dts_file: str, config: str, compat_db: Optional[str],
 @audit_group.command("amp")
 @click.argument("linux_dts", type=click.Path(exists=True))
 @click.argument("rtos_dts", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--color/--no-color", default=None)
 def audit_amp(linux_dts: str, rtos_dts: str, soc: Optional[str],
               color: Optional[bool]):
@@ -237,7 +237,7 @@ def audit_matrix(boards_dir: str, change_type: Optional[str], change_name: Optio
 @audit_group.command("cross-check")
 @click.argument("bootloader_dts", type=click.Path(exists=True))
 @click.argument("kernel_dts", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default="auto", show_default=True)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default="auto", show_default=True)
 @click.option("--report", type=click.Choice(["text", "html", "json"]),
               default="text", show_default=True)
 @click.option("-o", "--output", default=None, metavar="FILE")
@@ -271,7 +271,7 @@ def audit_cross_check(bootloader_dts: str, kernel_dts: str, soc: str,
 @audit_group.command("overlay")
 @click.argument("base_dts", type=click.Path(exists=True))
 @click.argument("overlays", type=click.Path(exists=True), nargs=-1, required=True)
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default="auto", show_default=True)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default="auto", show_default=True)
 @click.option("--run-checks", is_flag=True,
               help="Also run consistency rules on the merged tree.")
 @click.option("--color/--no-color", default=None)

@@ -10,20 +10,36 @@ import click
 
 from socc import __version__
 from socc.commands._shared import (
-    ALL_SOC_CHOICES, build_registry, auto_detect_soc, severity_tag, echo,
-    load_config, filter_by_severity, SAMPLE_CONFIG,
-    build_sample_model, parse_dts_file, Checker, Path, Optional,
+    ALL_SOC_CHOICES, FuzzySoCType, build_registry, auto_detect_soc,
+    severity_tag, echo, load_config, filter_by_severity, SAMPLE_CONFIG,
+    build_sample_model, parse_dts_file, parse_dts_cached, Checker, Path, Optional,
+    suggest_rule_codes,
 )
+
+# ── Granular exit-code mapping ────────────────────────────────────────────────
+# 0 = clean   1 = info only   2 = warnings present   3 = errors present
+_EXIT_CODES = {"error": 3, "warning": 2, "info": 1}
+
+
+def _compute_exit_code(violations: list) -> int:
+    """Return the exit code for *violations* (0 = all clear)."""
+    if not violations:
+        return 0
+    worst = max(_EXIT_CODES.get(v.severity, 0) for v in violations)
+    return worst
 
 
 # ── check ──────────────────────────────────────────────────────────────────
 
 @click.command()
 @click.argument("dts_file", type=click.Path(exists=True), required=False)
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None,
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), default=None,
+              metavar="SOC",
               help="Target SoC name (use 'auto' for filename-based auto-detection).")
-@click.option("--format", "output_format", type=click.Choice(["text", "json", "sarif"]),
-              default=None, help="Output format (text, json, or sarif for GitHub Code Scanning).")
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json", "sarif", "annotations"]),
+              default=None,
+              help="Output format (text, json, sarif, or annotations for GitHub Actions).")
 @click.option("--min-severity", type=click.Choice(["error", "warning", "info"]),
               default=None, help="Minimum severity level to report.")
 @click.option("--ignore-rule", multiple=True, metavar="CODE",
@@ -37,63 +53,119 @@ from socc.commands._shared import (
 @click.option("--netlist", "netlist_csv", type=click.Path(exists=True), default=None,
               metavar="CSV",
               help="Path to an EDA pin-assignment CSV for netlist cross-checking.")
+@click.option("--watch", is_flag=True,
+              help="Re-run whenever the DTS file changes (Ctrl-C to quit).")
+@click.option("--no-cache", is_flag=True, default=False,
+              help="Skip the parse cache and always re-parse from disk.")
 def check(dts_file, soc, output_format, min_severity, ignore_rule,
-          skip_rules, color, demo, netlist_csv):
+          skip_rules, color, demo, netlist_csv, watch, no_cache):
     """Check a device tree for SoC consistency violations."""
+    import os, time
+
     cfg = load_config()
-    resolved_soc = soc or cfg.get("default_soc", "auto")
-    resolved_format = output_format or cfg.get("format", "text")
-    resolved_min_severity = min_severity or cfg.get("min_severity", "info")
-    ignored = set(cfg.get("ignore_rules", [])) | set(ignore_rule) | set(skip_rules)
-    use_color = color if color is not None else None
+    resolved_soc           = soc or cfg.get("default_soc", "auto")
+    resolved_format        = output_format or cfg.get("format", "text")
+    resolved_min_severity  = min_severity or cfg.get("min_severity", "info")
+    ignored                = set(cfg.get("ignore_rules", [])) | set(ignore_rule) | set(skip_rules)
+    use_color              = color if color is not None else None
 
-    registry = build_registry()
+    def _run_once() -> int:
+        """Execute one check pass.  Returns the exit code."""
+        registry = build_registry()
 
-    if demo:
-        echo("Running in demo mode...", color=use_color)
-        model = build_sample_model("rk3588")
-        soc_name = "rk3588"
-    else:
+        # ── warn about unknown --ignore-rule codes ────────────────────────
+        for bad in ignored:
+            known_codes = {r.code for r in registry.list_all_rules()}
+            if bad not in known_codes:
+                suggestion = suggest_rule_codes(bad, registry)
+                click.echo(
+                    click.style(f"Warning: unknown rule code {bad!r}. ", fg="yellow")
+                    + suggestion,
+                    err=True,
+                )
+
+        if demo:
+            echo("Running in demo mode...", color=use_color)
+            model    = build_sample_model("rk3588")
+            soc_name = "rk3588"
+            sf       = None
+        else:
+            if not dts_file:
+                click.echo("Error: specify a device-tree file or use --demo", err=True)
+                return 1
+            try:
+                echo(f"Loading device tree: {dts_file}", color=use_color)
+                if resolved_soc == "auto":
+                    soc_name = auto_detect_soc(Path(dts_file).name)
+                else:
+                    soc_name = resolved_soc
+                sf    = str(Path(dts_file).resolve())
+                model = (
+                    parse_dts_file(dts_file, soc_name)
+                    if no_cache
+                    else parse_dts_cached(dts_file, soc_name)
+                )
+                echo(f"Loaded device tree (SoC: {soc_name})", color=use_color)
+            except FileNotFoundError:
+                click.echo(f"Error: file not found: {dts_file!r}", err=True)
+                return 1
+            except Exception as e:
+                click.echo(f"Error: failed to parse device tree: {e}", err=True)
+                return 1
+
+        extra_metadata: dict = {}
+        if netlist_csv:
+            try:
+                from socc.netlist.parser import parse_netlist_csv
+                netlist_pins = parse_netlist_csv(netlist_csv)
+                extra_metadata["netlist_pins"] = netlist_pins
+                echo(f"Loaded netlist: {netlist_csv} ({len(netlist_pins)} pins)",
+                     color=use_color)
+            except Exception as e:
+                click.echo(f"Warning: could not load netlist CSV: {e}", err=True)
+
+        checker    = Checker(registry)
+        violations = checker.check(model, soc_name, extra_metadata=extra_metadata,
+                                   source_file=sf)
+
+        if ignored:
+            violations = [v for v in violations if v.code not in ignored]
+        violations = filter_by_severity(violations, resolved_min_severity)
+
+        report = checker.generate_report(violations, resolved_format, color=use_color)
+        click.echo(report)
+
+        return _compute_exit_code(violations)
+
+    if watch:
         if not dts_file:
-            click.echo("Error: specify a device-tree file or use --demo", err=True)
-            return
+            click.echo("Error: --watch requires a DTS file argument.", err=True)
+            raise SystemExit(1)
+        last_mtime = None
+        click.echo(click.style(f"Watching {dts_file} — press Ctrl-C to quit.",
+                               fg="cyan", bold=True))
         try:
-            echo(f"Loading device tree: {dts_file}", color=use_color)
-            if resolved_soc == "auto":
-                soc_name = auto_detect_soc(Path(dts_file).name)
-            else:
-                soc_name = resolved_soc
-            model = parse_dts_file(dts_file, soc_name)
-            echo(f"Loaded device tree (SoC: {soc_name})", color=use_color)
-        except FileNotFoundError:
-            click.echo(f"Error: file not found: {dts_file!r}", err=True)
-            return
-        except Exception as e:
-            click.echo(f"Error: failed to parse device tree: {e}", err=True)
-            return
+            while True:
+                try:
+                    mtime = os.stat(dts_file).st_mtime
+                except OSError:
+                    time.sleep(0.5)
+                    continue
+                if mtime != last_mtime:
+                    last_mtime = mtime
+                    if last_mtime is not None:  # not the very first run
+                        click.echo("\n" + click.style(
+                            f"[socc watch] {dts_file} changed — re-checking...",
+                            fg="cyan", bold=True))
+                    _run_once()
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            click.echo(click.style("\n[socc watch] stopped.", fg="cyan"))
+        return
 
-    extra_metadata: dict = {}
-    if netlist_csv:
-        try:
-            from socc.netlist.parser import parse_netlist_csv
-            netlist_pins = parse_netlist_csv(netlist_csv)
-            extra_metadata["netlist_pins"] = netlist_pins
-            echo(f"Loaded netlist: {netlist_csv} ({len(netlist_pins)} pins)", color=use_color)
-        except Exception as e:
-            click.echo(f"Warning: could not load netlist CSV: {e}", err=True)
-
-    checker = Checker(registry)
-    violations = checker.check(model, soc_name, extra_metadata=extra_metadata)
-
-    if ignored:
-        violations = [v for v in violations if v.code not in ignored]
-    violations = filter_by_severity(violations, resolved_min_severity)
-
-    report = checker.generate_report(violations, resolved_format, color=use_color)
-    click.echo(report)
-
-    if any(v.severity == "error" for v in violations):
-        raise SystemExit(1)
+    exit_code = _run_once()
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 # ── rules ──────────────────────────────────────────────────────────────────
@@ -129,7 +201,7 @@ def version():
 
 @click.command()
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None,
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None,
               help="Target SoC (default: auto-detect from filename).")
 @click.option("--color/--no-color", default=None,
               help="Force colored output on or off.")
@@ -215,15 +287,26 @@ def autofix(dts_file: str, apply: bool, generate_patch: bool,
 @click.command()
 @click.argument("before_dts", type=click.Path(exists=True))
 @click.argument("after_dts", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None,
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), default=None,
+              metavar="SOC",
               help="Target SoC (default: auto-detect from filename).")
 @click.option("--color/--no-color", default=None,
               help="Force colored output on or off.")
-@click.option("--format", "output_format", type=click.Choice(["text", "json"]),
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json", "annotations"]),
               default="text", help="Output format.")
+@click.option("--ci", is_flag=True,
+              help="CI mode: exit non-zero on ANY regression, not just errors.")
 def diff(before_dts: str, after_dts: str, soc: Optional[str],
-         color: Optional[bool], output_format: str):
-    """Show violations introduced between two DTS versions (regressions only)."""
+         color: Optional[bool], output_format: str, ci: bool):
+    """Show violations introduced between two DTS versions (regressions only).
+
+    \b
+    Exit codes:
+      0  No regressions.
+      2  Regressions at warning level (--ci only).
+      3  Regressions at error level.
+    """
     use_color = color
     registry = build_registry()
 
@@ -234,12 +317,12 @@ def diff(before_dts: str, after_dts: str, soc: Optional[str],
 
     def _run(path: str, soc_name: str):
         try:
-            model = parse_dts_file(path, soc_name)
+            model = parse_dts_cached(path, soc_name)
         except Exception as e:
             click.echo(f"Error parsing {path}: {e}", err=True)
             raise SystemExit(1)
         checker = Checker(registry)
-        return checker.check(model, soc_name)
+        return checker.check(model, soc_name, source_file=str(Path(path).resolve()))
 
     violations_before = _run(before_dts, _detect(before_dts))
     violations_after  = _run(after_dts,  _detect(after_dts))
@@ -251,28 +334,32 @@ def diff(before_dts: str, after_dts: str, soc: Optional[str],
         data = [{"code": v.code, "severity": v.severity, "message": v.message,
                  "location": v.location, "suggestion": v.suggestion} for v in regressions]
         click.echo(_json.dumps(data, indent=2))
-        if any(v.severity == "error" for v in regressions):
-            raise SystemExit(1)
-        return
-
-    if not regressions:
-        if use_color is not False:
-            click.echo(click.style("No regressions detected.", fg="green", bold=True))
+    elif output_format == "annotations":
+        checker_obj = Checker(registry)
+        click.echo(checker_obj._generate_annotations_report(regressions))
+    else:
+        if not regressions:
+            if use_color is not False:
+                click.echo(click.style("No regressions detected.", fg="green", bold=True))
+            else:
+                click.echo("No regressions detected.")
         else:
-            click.echo("No regressions detected.")
-        return
+            click.echo(f"Regressions introduced ({len(regressions)} new violation(s)):\n")
+            for v in regressions:
+                tag = severity_tag(v.severity, use_color)
+                loc = f"  at {v.location}" if v.location else ""
+                click.echo(f"  {tag} [{v.code}] {v.message}{loc}")
+                if v.suggestion:
+                    click.echo(f"       Fix: {v.suggestion.splitlines()[0]}")
+                click.echo()
 
-    click.echo(f"Regressions introduced ({len(regressions)} new violation(s)):\n")
-    for v in regressions:
-        tag = severity_tag(v.severity, use_color)
-        loc = f"  at {v.location}" if v.location else ""
-        click.echo(f"  {tag} [{v.code}] {v.message}{loc}")
-        if v.suggestion:
-            click.echo(f"       Fix: {v.suggestion.splitlines()[0]}")
-        click.echo()
-
-    if any(v.severity == "error" for v in regressions):
-        raise SystemExit(1)
+    # ── exit code ─────────────────────────────────────────────────────────
+    if ci:
+        exit_code = _compute_exit_code(regressions)
+    else:
+        exit_code = 3 if any(v.severity == "error" for v in regressions) else 0
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 # ── smart-diff ───────────────────────────────────────────────────────────────
@@ -321,7 +408,7 @@ def smart_diff(file_a: str, file_b: str, output_format: str,
 @click.command()
 @click.argument("node_or_name")
 @click.argument("dts_file", type=click.Path(exists=True), required=False)
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None,
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None,
               help="Target SoC (default: auto-detect from filename).")
 @click.option("--list", "list_kb", is_flag=True, default=False,
               help="List all documented hardware blocks in the knowledge base.")

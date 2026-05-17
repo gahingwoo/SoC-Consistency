@@ -5,8 +5,8 @@ from __future__ import annotations
 import click
 
 from socc.commands._shared import (
-    ALL_SOC_CHOICES, auto_detect_soc,
-    parse_dts_file, Path, Optional,
+    ALL_SOC_CHOICES, FuzzySoCType, auto_detect_soc,
+    parse_dts_file, parse_dts_cached, Path, Optional,
 )
 
 
@@ -19,7 +19,7 @@ def generate_group():
 
 @generate_group.command("qemu")
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--format", "fmt", type=click.Choice(["cmd", "machine-c"]),
               default="cmd", show_default=True,
               help="cmd: shell script (default).  machine-c: QEMU C machine skeleton.")
@@ -63,7 +63,7 @@ def generate_qemu(dts_file: str, soc: Optional[str], fmt: str,
 
 @generate_group.command("tests")
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("-o", "--output", default=None, metavar="FILE")
 def generate_tests(dts_file: str, soc: Optional[str], output: Optional[str]):
     """Generate a bash bring-up test script from a DTS file.
@@ -91,7 +91,7 @@ def generate_tests(dts_file: str, soc: Optional[str], output: Optional[str]):
 
 @generate_group.command("saleae")
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("-o", "--output", default=None, metavar="FILE")
 def generate_saleae(dts_file: str, soc: Optional[str], output: Optional[str]):
     """Generate a Saleae Logic 2 workspace JSON from a DTS file.
@@ -118,7 +118,7 @@ def generate_saleae(dts_file: str, soc: Optional[str], output: Optional[str]):
 
 @generate_group.command("headers")
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("-o", "--output", default=None, metavar="FILE")
 @click.option("--stdout", "to_stdout", is_flag=True, default=False,
               help="Print header to stdout instead of writing a file.")
@@ -153,7 +153,7 @@ def generate_headers(dts_file: str, soc: Optional[str], output: Optional[str],
 
 @generate_group.command("diagram")
 @click.argument("dts_file", type=click.Path(exists=True))
-@click.option("--soc", type=click.Choice(ALL_SOC_CHOICES), default=None)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
 @click.option("--format", "fmt", type=click.Choice(["mermaid", "plantuml", "dot"]),
               default="mermaid", show_default=True)
 @click.option("--type", "diagram_type",

@@ -32,6 +32,7 @@ coverage.xml
 .tox/
 nosetests.xml
 junit*.xml
+tests/
 
 # Type checkers & linters
 .mypy_cache/
