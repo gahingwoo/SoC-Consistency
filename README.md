@@ -38,6 +38,7 @@ $ socc check board.dts --soc rk3588
 - [Supported SoCs](#supported-socs)
 - [CI / CD integration](#ci--cd-integration)
 - [What's new in v1.2](#whats-new-in-v12)
+- [What's new in v1.2 (continued)](#whats-new-in-v12-continued--developer-experience-features)
 - [Upgrading from pre-1.1](#upgrading-from-pre-11)
 - [Rules reference](#rules-reference)
 - [Architecture](#architecture)
@@ -504,6 +505,127 @@ socc sim shell --demo
 ```
 
 Falls back to the built-in REPL when IPython is not available.
+
+---
+
+## What's new in v1.2 (continued) — developer-experience features
+
+### `socc bootstrap` — zero-cost SoC onboarding
+
+Don't have a YAML constraint file for your SoC?  Point `socc bootstrap` at any
+directory of Linux mainline `.dtsi` files and it will generate a working stub in
+under two seconds:
+
+```bash
+socc bootstrap --from-mainline ./linux/arch/arm64/boot/dts/rockchip/ --soc rk3588
+# → data/soc/rockchip/rk3588.yaml  (GPIO banks, clocks, IRQ controllers)
+```
+
+The generated file is fully editable.  Add datasheet-level constraints
+(max GPIO index, clock ceiling, memory size) to get deeper checks.
+
+### `socc viz pinmap --format xlsx` — Excel pin-assignment matrix
+
+Hardware engineers live in Excel.  Export a fully formatted, colour-coded
+pin-assignment spreadsheet that you can drop straight into a design document:
+
+```bash
+socc viz pinmap board.dts --soc rk3588 --format xlsx -o rk3588_pins.xlsx
+socc viz pinmap board.dts --soc rk3588 --format csv  -o rk3588_pins.csv
+```
+
+Requires `openpyxl` (`pip install socc[xlsx]`).
+
+### Inline `socc-ignore` suppression comments
+
+Suppress a specific violation on the offending line without touching the
+command line.  The comment is visible in code review and carries an optional
+reason:
+
+```dts
+/* socc-ignore: BND-001 -- hardware errata, confirmed by vendor */
+gpios = <&gpio4 35 GPIO_ACTIVE_HIGH>;
+```
+
+Multiple codes can be listed comma-separated: `/* socc-ignore: BND-001, GP-002 */`.
+
+### `.socc_ignore` project-level exclusion file
+
+Like `.gitignore` but for violations.  Commit it to your repo so the whole
+team benefits:
+
+```
+# .socc_ignore
+# Legacy layout — scheduled for Q3 hardware respin
+BND-001  /soc/spi@fe610000
+PD-006   *                   # suppress all orphaned-regulator warnings globally
+GP-*     legacy/             # all GPIO rules in legacy/ subdirectory
+```
+
+Format: `CODE [PATH_GLOB]  [# optional comment]`
+
+### Result cache — skip the rule engine when nothing changed
+
+When the DTS file content is identical to the previous run, `socc check`
+now skips parsing **and** rule execution entirely, reading cached violations
+instead:
+
+```
+[cache] 2 violation(s) (content unchanged, skipped rule engine)
+```
+
+Invalidated automatically when any rule is added or the file changes.
+Bypass with `--no-cache`.
+
+### Custom rule plugin directory (`--rules-dir`)
+
+Load company-internal rules without forking:
+
+```bash
+socc check board.dts --soc rk3588 --rules-dir ./acme_rules/
+```
+
+Every `*.py` file in the directory is imported.  If it exposes a
+`register(registry)` function that function is called with the live registry.
+
+```python
+# acme_rules/power_budget.py
+from socc.rules.base import Rule, Violation
+
+class AcmePowerBudgetRule(Rule):
+    code     = "ACME-001"
+    name     = "Power budget"
+    severity = "error"
+    description = "Total power draw must not exceed 5 W"
+    soc_targets = ["*"]
+
+    def check(self, model, ctx):
+        # … your logic …
+        return []
+
+def register(registry):
+    registry.register(AcmePowerBudgetRule())
+```
+
+### `socc check --since REF` — git-aware incremental check
+
+In CI, check only files changed since a git reference:
+
+```bash
+socc check board.dts --soc rk3588 --since origin/main
+# → skipped if board.dts has no changes since origin/main
+```
+
+### `socc install-hook` — one-command git pre-commit integration
+
+```bash
+socc install-hook               # .git/hooks/pre-commit
+socc install-hook --hook pre-push
+socc install-hook --uninstall   # remove it
+```
+
+The hook automatically checks only **staged** DTS files, so it adds
+milliseconds of latency for non-DTS commits.
 
 ---
 

@@ -360,6 +360,7 @@ class DTSMapper:
                     name=node_name,
                     path=f"/{node_name}",
                     properties=dict(props),
+                    source_line=node.get("line"),
                 )
                 self.devices[node_name] = ir_node
 

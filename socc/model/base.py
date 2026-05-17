@@ -13,6 +13,8 @@ class IRNode:
     properties: Dict[str, Any] = field(default_factory=dict)
     children: List["IRNode"] = field(default_factory=list)
     parent: Optional["IRNode"] = None
+    source_line: Optional[int] = None    # line number of the opening '{' in the DTS file
+    source_file: Optional[str] = None   # source DTS file path (set by parser)
 
     def get_property(self, key: str, default: Any = None) -> Any:
         """Return property value, or *default* if not present."""

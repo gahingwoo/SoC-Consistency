@@ -57,10 +57,17 @@ def _compute_exit_code(violations: list) -> int:
               help="Re-run whenever the DTS file changes (Ctrl-C to quit).")
 @click.option("--no-cache", is_flag=True, default=False,
               help="Skip the parse cache and always re-parse from disk.")
+@click.option("--rules-dir", "rules_dirs", multiple=True,
+              type=click.Path(exists=True, file_okay=False),
+              metavar="DIR",
+              help="Load additional rule plugins from DIR (can be repeated).")
+@click.option("--since", "git_since", default=None, metavar="REF",
+              help="Only check DTS files changed since this git ref (e.g. HEAD~1, main).")
 def check(dts_file, soc, output_format, min_severity, ignore_rule,
-          skip_rules, color, demo, netlist_csv, watch, no_cache):
+          skip_rules, color, demo, netlist_csv, watch, no_cache,
+          rules_dirs, git_since):
     """Check a device tree for SoC consistency violations."""
-    import os, time
+    import os, time, hashlib
 
     cfg = load_config()
     resolved_soc           = soc or cfg.get("default_soc", "auto")
@@ -69,9 +76,24 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
     ignored                = set(cfg.get("ignore_rules", [])) | set(ignore_rule) | set(skip_rules)
     use_color              = color if color is not None else None
 
+    # ── load project-level .socc_ignore ──────────────────────────────────────
+    from socc.suppress import SuppressFilter
+    suppress = SuppressFilter.load(Path(dts_file).parent if dts_file else Path("."))
+
+    # ── git --since filter ────────────────────────────────────────────────────
+    if git_since and dts_file:
+        changed = _git_changed_files(git_since)
+        abs_dts = str(Path(dts_file).resolve())
+        if changed is not None and abs_dts not in changed:
+            click.echo(
+                click.style(f"[socc] No changes to {dts_file} since {git_since!r}. Skipped.",
+                            fg="cyan"),
+            )
+            return
+
     def _run_once() -> int:
         """Execute one check pass.  Returns the exit code."""
-        registry = build_registry()
+        registry = build_registry(extra_rules_dirs=list(rules_dirs) if rules_dirs else None)
 
         # ── warn about unknown --ignore-rule codes ────────────────────────
         for bad in ignored:
@@ -89,6 +111,7 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
             model    = build_sample_model("rk3588")
             soc_name = "rk3588"
             sf       = None
+            source_text = None
         else:
             if not dts_file:
                 click.echo("Error: specify a device-tree file or use --demo", err=True)
@@ -100,6 +123,7 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
                 else:
                     soc_name = resolved_soc
                 sf    = str(Path(dts_file).resolve())
+                source_text = Path(dts_file).read_text(errors="replace")
                 model = (
                     parse_dts_file(dts_file, soc_name)
                     if no_cache
@@ -124,13 +148,40 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
             except Exception as e:
                 click.echo(f"Warning: could not load netlist CSV: {e}", err=True)
 
-        checker    = Checker(registry)
-        violations = checker.check(model, soc_name, extra_metadata=extra_metadata,
-                                   source_file=sf)
+        # ── try violation result cache (content-hash keyed) ───────────────
+        rules_hash = hashlib.sha1(
+            ",".join(sorted(r.code for r in registry.list_all_rules())).encode()
+        ).hexdigest()[:12]  # noqa: S324
+
+        violations = None
+        if not no_cache and sf:
+            from socc.cache import get_cached_violations, set_cached_violations
+            violations = get_cached_violations(sf, soc_name, rules_hash)
+            if violations is not None:
+                echo(
+                    click.style(
+                        f"[cache] {len(violations)} violation(s) (content unchanged, "
+                        f"skipped rule engine)",
+                        fg="cyan"),
+                    color=use_color,
+                )
+
+        if violations is None:
+            checker    = Checker(registry)
+            violations = checker.check(model, soc_name, extra_metadata=extra_metadata,
+                                       source_file=sf)
+            if not no_cache and sf:
+                from socc.cache import set_cached_violations
+                set_cached_violations(sf, soc_name, rules_hash, violations)
+        else:
+            checker = Checker(registry)
 
         if ignored:
             violations = [v for v in violations if v.code not in ignored]
         violations = filter_by_severity(violations, resolved_min_severity)
+
+        # ── apply .socc_ignore + inline socc-ignore comments ─────────────
+        violations = suppress.apply(violations, source_text)
 
         report = checker.generate_report(violations, resolved_format, color=use_color)
         click.echo(report)
@@ -499,3 +550,162 @@ def self_update(check_only: bool):
         click.echo("pip upgrade failed.  Try manually:", err=True)
         click.echo("  pip install --upgrade soc-consistency", err=True)
         raise SystemExit(1)
+
+
+# ── bootstrap ────────────────────────────────────────────────────────────────
+
+@click.command("bootstrap")
+@click.option("--from-mainline", "src_dir",
+              type=click.Path(exists=True, file_okay=False),
+              required=True,
+              metavar="DIR",
+              help="Linux mainline DTS directory to scan (e.g. arch/arm64/boot/dts/rockchip/).")
+@click.option("--soc", default=None, metavar="NAME",
+              help="Target SoC name (default: auto-detect from directory name).")
+@click.option("-o", "--output-dir", default=None, metavar="DIR",
+              help="Output directory for the generated YAML (default: data/soc/<vendor>/).")
+@click.option("--verbose", is_flag=True, help="Print extraction details.")
+def bootstrap(src_dir: str, soc: Optional[str], output_dir: Optional[str], verbose: bool):
+    """Generate a SoC YAML constraint stub from Linux mainline .dtsi files.
+
+    \b
+    Example:
+        socc bootstrap --from-mainline ./linux/arch/arm64/boot/dts/rockchip/ --soc rk3588
+        socc bootstrap --from-mainline ./linux/arch/arm64/boot/dts/marvell/
+    """
+    from socc.bootstrap import bootstrap_from_directory
+    try:
+        out = bootstrap_from_directory(
+            src_dir, soc, output_dir=output_dir, verbose=verbose
+        )
+        click.echo(click.style(f"[bootstrap] YAML stub written to: {out}", fg="green", bold=True))
+        click.echo("Edit the file to add datasheet-level signal constraints, then run:")
+        click.echo(f"  socc check board.dts --soc {out.stem}")
+    except ValueError as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        raise SystemExit(1)
+
+
+# ── install-hook ──────────────────────────────────────────────────────────────
+
+_HOOK_SCRIPT = """\
+#!/bin/sh
+# socc pre-commit hook — installed by 'socc install-hook'
+# Checks only DTS files that are staged for commit.
+set -e
+
+DTS_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\\.(dts|dtsi)$' || true)
+if [ -z "$DTS_FILES" ]; then
+    exit 0
+fi
+
+echo "[socc] Checking $(echo "$DTS_FILES" | wc -l | tr -d ' ') staged DTS file(s)…"
+FAILED=0
+for f in $DTS_FILES; do
+    socc check "$f" --no-color --min-severity warning || FAILED=1
+done
+
+if [ "$FAILED" -ne 0 ]; then
+    echo ""
+    echo "[socc] Commit blocked: fix the violations above, or use --no-verify to skip."
+    exit 1
+fi
+"""
+
+@click.command("install-hook")
+@click.option("--hook", "hook_name",
+              type=click.Choice(["pre-commit", "pre-push"]),
+              default="pre-commit", show_default=True,
+              help="Which git hook to install.")
+@click.option("--force", is_flag=True,
+              help="Overwrite an existing hook file.")
+@click.option("--uninstall", is_flag=True,
+              help="Remove the socc hook.")
+def install_hook(hook_name: str, force: bool, uninstall: bool):
+    """Install (or remove) a git hook that runs socc on staged DTS files.
+
+    \b
+    Examples:
+        socc install-hook               # installs .git/hooks/pre-commit
+        socc install-hook --pre-push    # installs .git/hooks/pre-push
+        socc install-hook --uninstall   # removes the hook
+    """
+    import stat as _stat
+
+    # Find .git directory (walk up from cwd)
+    cwd = Path.cwd()
+    git_dir: Optional[Path] = None
+    for parent in [cwd] + list(cwd.parents):
+        candidate = parent / ".git"
+        if candidate.is_dir():
+            git_dir = candidate
+            break
+        if (candidate.parent / ".git").is_file():
+            # Submodule: .git is a file pointing to the real dir
+            git_dir = candidate.parent / ".git"
+            break
+
+    if git_dir is None:
+        click.echo("Error: not inside a git repository.", err=True)
+        raise SystemExit(1)
+
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+    hook_path = hooks_dir / hook_name
+
+    if uninstall:
+        if hook_path.exists():
+            hook_path.unlink()
+            click.echo(click.style(f"Removed {hook_path}", fg="yellow"))
+        else:
+            click.echo(f"No hook found at {hook_path}.")
+        return
+
+    if hook_path.exists() and not force:
+        click.echo(
+            f"Error: {hook_path} already exists. Use --force to overwrite.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    hook_path.write_text(_HOOK_SCRIPT)
+    # Make executable
+    current = hook_path.stat().st_mode
+    hook_path.chmod(current | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+
+    click.echo(click.style(f"[socc] Installed {hook_name} hook → {hook_path}", fg="green", bold=True))
+    click.echo("Staged DTS files will now be checked on every commit.")
+    click.echo("Use 'git commit --no-verify' to bypass.")
+
+
+# ── _git_changed_files (internal helper) ─────────────────────────────────────
+
+def _git_changed_files(since_ref: str) -> Optional[set]:
+    """Return a set of absolute paths changed since *since_ref*.
+
+    Returns *None* if git is not available or the ref is invalid (so callers
+    can fall back to running the full check).
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", since_ref, "HEAD", "--"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        repo_root_result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if repo_root_result.returncode != 0:
+            return None
+        repo_root = Path(repo_root_result.stdout.strip())
+        changed = set()
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line:
+                changed.add(str((repo_root / line).resolve()))
+        return changed
+    except Exception:
+        return None

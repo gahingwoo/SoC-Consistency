@@ -60,6 +60,17 @@ dev = [
 viz = [
     "pyvis>=0.3.2",
 ]
+xlsx = [
+    "openpyxl>=3.0",
+]
+shell = [
+    "ipython>=8.0",
+]
+all = [
+    "pyvis>=0.3.2",
+    "openpyxl>=3.0",
+    "ipython>=8.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/gahingwoo/SoC-Consistency"

@@ -76,8 +76,15 @@ class FuzzySoCType(click.ParamType):
         )
 
 
-def build_registry() -> RuleRegistry:
-    """Build and return a fully populated rule registry (all vendors)."""
+def build_registry(extra_rules_dirs: Optional[list] = None) -> RuleRegistry:
+    """Build and return a fully populated rule registry (all vendors).
+
+    Args:
+        extra_rules_dirs: Optional list of directory paths.  Each directory is
+            scanned for ``*.py`` files; every module found is imported and its
+            ``register(registry)`` function (if present) is called.  This is the
+            plugin hook for custom / company-internal rule sets.
+    """
     registry = RuleRegistry()
     register_common_rules(registry)
     for soc in ROCKCHIP_SOCS:
@@ -90,6 +97,46 @@ def build_registry() -> RuleRegistry:
         register_qualcomm_rules(registry, soc)
     for soc in NXP_SOCS:
         register_all_nxp_rules(registry, soc)
+
+    # ── load plugin rules from extra directories ──────────────────────────────
+    if extra_rules_dirs:
+        import importlib.util
+        import sys as _sys
+        for raw_dir in extra_rules_dirs:
+            rules_path = Path(raw_dir)
+            if not rules_path.is_dir():
+                click.echo(
+                    click.style(f"Warning: --rules-dir {raw_dir!r} is not a directory.",
+                                fg="yellow"),
+                    err=True,
+                )
+                continue
+            for py_file in sorted(rules_path.glob("*.py")):
+                mod_name = f"_socc_plugin_{py_file.stem}"
+                spec = importlib.util.spec_from_file_location(mod_name, py_file)
+                if spec is None or spec.loader is None:
+                    continue
+                mod = importlib.util.module_from_spec(spec)
+                _sys.modules[mod_name] = mod
+                try:
+                    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+                except Exception as e:
+                    click.echo(
+                        click.style(f"Warning: could not load plugin {py_file}: {e}",
+                                    fg="yellow"),
+                        err=True,
+                    )
+                    continue
+                if hasattr(mod, "register"):
+                    try:
+                        mod.register(registry)
+                    except Exception as e:
+                        click.echo(
+                            click.style(
+                                f"Warning: plugin {py_file}.register() failed: {e}",
+                                fg="yellow"),
+                            err=True,
+                        )
     return registry
 
 

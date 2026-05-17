@@ -83,3 +83,54 @@ def cache_stats() -> dict:
         "entries":   count,
         "size_kb":   total_bytes // 1024,
     }
+
+
+# ── Violation-result cache (keyed on file content hash + soc + rule hash) ─────
+
+def _result_key(file_path: str, soc_name: str, rules_hash: str) -> str:
+    """Key for the full violation-result cache."""
+    abs_path = os.path.abspath(file_path)
+    try:
+        content  = open(abs_path, "rb").read()
+        # sha1 is used here purely as a fast hash key; no security relevance.
+        file_hash = hashlib.sha1(content).hexdigest()  # noqa: S324
+    except OSError:
+        file_hash = "err"
+    raw = f"violations\x00{abs_path}\x00{file_hash}\x00{soc_name}\x00{rules_hash}"
+    return "v_" + hashlib.sha1(raw.encode()).hexdigest()  # noqa: S324
+
+
+def get_cached_violations(
+    file_path: str,
+    soc_name: str,
+    rules_hash: str,
+):
+    """Return cached violations list or *None* on miss.
+
+    ``rules_hash`` should be a short digest of the active rule set so that
+    violations are invalidated whenever rules are added or removed.
+    """
+    try:
+        key  = _result_key(file_path, soc_name, rules_hash)
+        path = _CACHE_DIR / f"{key}.pkl"
+        if path.exists():
+            return pickle.loads(path.read_bytes())  # noqa: S301
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def set_cached_violations(
+    file_path: str,
+    soc_name: str,
+    rules_hash: str,
+    violations,
+) -> None:
+    """Persist violation list into the result cache."""
+    try:
+        key = _result_key(file_path, soc_name, rules_hash)
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        (_CACHE_DIR / f"{key}.pkl").write_bytes(pickle.dumps(violations))
+    except Exception:  # noqa: BLE001
+        pass
+
