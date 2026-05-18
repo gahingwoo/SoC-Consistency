@@ -13,6 +13,7 @@ from .compat_rules import register_compat_rules
 from .power_audit_rules import register_power_audit_rules
 from .sec_rules import register_sec_rules
 from .bw_rules import register_bw_rules
+from .reg_rules import register_reg_rules
 
 
 class GEN401OrphanedNode(BaseRule):
@@ -65,6 +66,7 @@ def register_common_rules(registry, soc_name: str = "common") -> None:
     register_power_audit_rules(registry, soc_name)
     register_sec_rules(registry, soc_name)
     register_bw_rules(registry, soc_name)
+    register_reg_rules(registry, soc_name)
 
 
 __all__ = [

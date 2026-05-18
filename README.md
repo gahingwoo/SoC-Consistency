@@ -37,6 +37,7 @@ $ socc check board.dts --soc rk3588
   - [socc socdef — constraint files](#socc-socdef--constraint-files)
 - [Supported SoCs](#supported-socs)
 - [CI / CD integration](#ci--cd-integration)
+- [What's new in v1.2.3](#whats-new-in-v123)
 - [What's new in v1.2.2](#whats-new-in-v122)
 - [What's new in v1.2](#whats-new-in-v12)
 - [What's new in v1.2 (continued)](#whats-new-in-v12-continued--developer-experience-features)
@@ -525,6 +526,109 @@ socc sim shell --demo
 ```
 
 Falls back to the built-in REPL when IPython is not available.
+
+---
+
+## What's new in v1.2.3
+
+### New rule — MM-006: Register Address / Node-Name Mismatch
+
+A DTS node encodes its hardware address in two places: the `@hex` suffix in the
+node name (`i2c@fe2b0000`) and the first value of the `reg` property.  When
+these two disagree — typically a copy-paste error — the kernel maps the driver
+to the **wrong MMIO window**.  The peripheral either fails to probe or silently
+corrupts adjacent memory regions.  `dtc` compiles such files without warnings.
+
+```dts
+/* BAD — node name says 0xfe2b0000, reg says 0xfe2c0000 */
+i2c@fe2b0000 {
+    reg = <0xfe2c0000 0x1000>;   /* MM-006 */
+};
+
+/* GOOD */
+i2c@fe2b0000 {
+    reg = <0xfe2b0000 0x1000>;
+};
+```
+
+```
+error[MM-006]: Node is named 'i2c@fe2b0000' (address 0xfe2b0000) but its
+               reg property declares base address 0xfe2c0000.
+       Fix   : Rename to i2c@fe2c0000 or correct reg to <… 0xfe2b0000 …>.
+```
+
+Both 32-bit (`<addr size>`) and 64-bit cell pairs (`<0x0 addr 0x0 size>`) are
+handled automatically.
+
+---
+
+### Deliberate-violation annotations — `socc-expect`
+
+The existing `/* socc-ignore: CODE */` comment silences a violation permanently
+(useful for known hardware errata).  The new `/* socc-expect: CODE */` comment
+serves the opposite purpose: it documents that a violation is **intentional and
+load-bearing** (a fly-wire, a hardware workaround, a deliberate override) and
+should alert you if it ever disappears.
+
+```dts
+/* socc-expect: MM-006 -- voltage-divider fly-wire on board rev B */
+i2c@fe2b0000 {
+    reg = <0xfe2c0000 0x1000>;
+};
+```
+
+| State | Behaviour |
+|-------|-----------|
+| Expected violation fires | Silenced — same as `socc-ignore` |
+| Expected violation does NOT fire | `info[SE-001]` injected — stale comment detected |
+
+The `SE-001` message explains which code was expected and on which line, so you
+can quickly find and remove the obsolete annotation:
+
+```
+info[SE-001]: Expected violation 'MM-006' did not occur near line 5.
+              The fly-wire or workaround may have been removed.
+       Fix  : Remove or update the '/* socc-expect: MM-006 */' comment.
+```
+
+Free-text notes after `--` are ignored (`/* socc-expect: PIN-202 -- confirmed with EE */`).
+Multiple codes are comma-separated (`/* socc-expect: MM-006, PD-001 */`).
+
+---
+
+### Binary DTB decompiler — `socc decompile`
+
+Annotates the `dtc` decompile output with human-readable peripheral names from
+the SoC hardware database, so you can navigate unfamiliar binary blobs without
+memorising address maps.
+
+```bash
+socc decompile board.dtb --soc rk3588
+socc decompile board.dtb --soc rk3588 -o board_annotated.dts
+socc decompile board.dtb --no-annotate     # raw dtc output only
+```
+
+Example output (RK3588):
+
+```dts
+/*
+ * Decompiled by socc v1.2.3 for rk3588
+ * Peripheral addresses annotated from hardware constraint database.
+ * This file is auto-generated — review before use.
+ */
+
+        gpio0@fd8a0000  /* GPIO0 (32-pin, 3.3V) */ {
+                ...
+        };
+
+        cru@fd7c0000  /* CRU — Clock and Reset Unit */ {
+                ...
+        };
+```
+
+Works on both `.dtb` binary blobs and `.dts` text files.  Falls back to plain
+`dtc` output if `dtc` is not installed or if no SoC database entry is found for
+the target.
 
 ---
 

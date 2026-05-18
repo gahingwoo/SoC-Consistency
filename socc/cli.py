@@ -12,7 +12,7 @@ from socc import __version__
 # ── top-level commands ────────────────────────────────────────────────────────
 from socc.commands.core import (
     check, rules, version, fix, autofix, diff, smart_diff, explain,
-    init_cmd, self_update, bootstrap, install_hook,
+    init_cmd, self_update, bootstrap, install_hook, decompile,
 )
 
 # ── command groups ────────────────────────────────────────────────────────────
@@ -62,6 +62,7 @@ cli.add_command(init_cmd,     name="init")
 cli.add_command(self_update)
 cli.add_command(bootstrap)
 cli.add_command(install_hook, name="install-hook")
+cli.add_command(decompile)
 
 # ── register command groups ───────────────────────────────────────────────────
 

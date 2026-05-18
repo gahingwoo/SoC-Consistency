@@ -868,3 +868,127 @@ def _git_changed_files(since_ref: str) -> Optional[set]:
         return changed
     except Exception:
         return None
+
+
+# ── decompile ────────────────────────────────────────────────────────────────
+
+@click.command("decompile")
+@click.argument("dtb_file", type=click.Path(exists=True))
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), default=None, metavar="SOC",
+              help="Target SoC name — used to annotate known peripheral addresses.")
+@click.option("-o", "--output", default=None, metavar="FILE",
+              help="Write output to FILE (default: stdout).")
+@click.option("--no-annotate", is_flag=True, default=False,
+              help="Skip SoC-DB annotation and emit raw dtc output only.")
+def decompile(dtb_file: str, soc: Optional[str], output: Optional[str],
+              no_annotate: bool):
+    """Decompile a binary .dtb to annotated .dts source.
+
+    Uses dtc for the binary-to-text pass, then cross-references the SoC
+    hardware database to add human-readable inline comments.
+
+    \b
+    Examples:
+        socc decompile board.dtb --soc rk3588
+        socc decompile board.dtb --soc rk3588 -o board_annotated.dts
+        socc decompile board.dtb --no-annotate   # raw dtc output only
+    """
+    from socc.smartdiff import _decompile_dtb, DTBDecodeError
+
+    p = Path(dtb_file)
+
+    if p.suffix.lower() == ".dtb":
+        try:
+            raw_dts = _decompile_dtb(dtb_file)
+        except DTBDecodeError as exc:
+            click.echo(f"[ERROR] {exc}", err=True)
+            raise SystemExit(1)
+    else:
+        raw_dts = p.read_text(errors="replace")
+
+    if no_annotate:
+        _decompile_emit(raw_dts, output)
+        return
+
+    soc_name = soc or auto_detect_soc(p.name)
+    addr_db: dict = {}
+    if soc_name:
+        try:
+            from socc.parser.dts_mapper import load_soc_constraints
+            constraints = load_soc_constraints(soc_name)
+            if constraints:
+                for bank in constraints.get("gpio_banks", []):
+                    base = bank.get("base")
+                    if base:
+                        b = int(base, 16) if isinstance(base, str) else int(base)
+                        addr_db[b] = (
+                            f"GPIO{bank.get('bank', '?')} "
+                            f"({bank.get('pins', '?')}-pin, "
+                            f"{bank.get('voltage', '?')}V)"
+                        )
+                for cp in constraints.get("clock_providers", []):
+                    base = cp.get("base")
+                    if base:
+                        b = int(base, 16) if isinstance(base, str) else int(base)
+                        addr_db[b] = (
+                            f"{cp.get('name', 'CRU').upper()} - "
+                            f"{cp.get('description', '')}"
+                        )
+        except Exception:
+            pass
+
+    annotated = _annotate_dts(raw_dts, addr_db, soc_name)
+    _decompile_emit(annotated, output)
+    if output:
+        click.echo(
+            click.style(f"[socc] Annotated DTS written to {output}", fg="green"),
+            err=True,
+        )
+
+
+def _decompile_emit(text: str, output: Optional[str]) -> None:
+    if output:
+        Path(output).write_text(text)
+    else:
+        click.echo(text, nl=False)
+
+
+def _annotate_dts(raw: str, addr_db: dict, soc_name: Optional[str]) -> str:
+    """Add inline comments to dtc-decompiled DTS text."""
+    import re
+
+    _NODE_ADDR  = re.compile(r'^(\s*)([A-Za-z0-9_,+/-]+)@([0-9a-fA-F]+)\s*\{')
+    _STATUS_VAL = re.compile(r'status\s*=\s*"(okay|disabled|fail[^"]*)"')
+
+    from socc import __version__
+    soc_tag = f" for {soc_name}" if soc_name else ""
+    banner = (
+        "/*\n"
+        f" * Decompiled by socc v{__version__}{soc_tag}\n"
+        " * Peripheral addresses annotated from hardware constraint database.\n"
+        " * This file is auto-generated - review before use.\n"
+        " */\n\n"
+    )
+
+    lines = raw.splitlines(keepends=True)
+    out   = [banner]
+
+    for line in lines:
+        nm = _NODE_ADDR.match(line)
+        if nm:
+            indent, node_name, addr_hex = nm.group(1), nm.group(2), nm.group(3)
+            comment_parts = []
+            try:
+                addr_int = int(addr_hex, 16)
+                if addr_int in addr_db:
+                    comment_parts.append(addr_db[addr_int])
+            except ValueError:
+                pass
+
+            if comment_parts:
+                annotation = "  /* " + " | ".join(comment_parts) + " */"
+                line = f"{indent}{node_name}@{addr_hex}{annotation} {{\n"
+
+        out.append(line)
+
+    return "".join(out)
