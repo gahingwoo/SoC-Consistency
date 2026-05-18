@@ -13,7 +13,7 @@ from .model import (
 from .rules import BaseRule, CheckContext, RuleRegistry
 from .engine import Checker
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 __all__ = [
     # Model

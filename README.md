@@ -37,6 +37,7 @@ $ socc check board.dts --soc rk3588
   - [socc socdef — constraint files](#socc-socdef--constraint-files)
 - [Supported SoCs](#supported-socs)
 - [CI / CD integration](#ci--cd-integration)
+- [What's new in v1.2.2](#whats-new-in-v122)
 - [What's new in v1.2](#whats-new-in-v12)
 - [What's new in v1.2 (continued)](#whats-new-in-v12-continued--developer-experience-features)
 - [Upgrading from pre-1.1](#upgrading-from-pre-11)
@@ -160,6 +161,7 @@ socc check board.dts --soc rk3588 \
 |--------|-------------|
 | `--soc` | Target SoC (`rk3588`, `sun50i-h616`, `imx8mp`, …) |
 | `--min-severity` | Filter: `info` \| `warning` \| `error` \| `fatal` |
+| `--strict` | Exit non-zero for warnings too (default: only errors block CI) |
 | `--format` | Output: `text` (default) \| `json` \| `html` \| `sarif` |
 | `--netlist` | Cross-check against a KiCad or CSV netlist |
 | `--enable` / `--disable` | Toggle specific rule codes |
@@ -374,7 +376,25 @@ Drop socc into any pipeline:
     socc check board.dts --soc rk3588 --min-severity error --format sarif -o socc.sarif
 ```
 
-socc exits 0 on success, non-zero when violations at or above `--min-severity` are found.
+socc exits **0** on success, **3** when errors are present. By default, warnings do **not**
+produce a non-zero exit — your pipeline won't fail just because a vendor BSP has
+pre-existing style warnings.
+
+Use `--strict` when you want warnings to block CI too:
+
+```yaml
+# GitHub Actions — strict mode
+- name: Check DTS consistency
+  run: |
+    pip install soc-consistency
+    socc check board.dts --soc rk3588 --strict --format sarif -o socc.sarif
+```
+
+| Exit code | Meaning (default) | Meaning (`--strict`) |
+|-----------|-------------------|---------------------|
+| `0` | Clean or warnings/info only | Clean |
+| `2` | — | Warnings present |
+| `3` | Errors present | Errors present |
 
 A ready-made GitHub Actions workflow with [OIDC Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
 is included at [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
@@ -505,6 +525,68 @@ socc sim shell --demo
 ```
 
 Falls back to the built-in REPL when IPython is not available.
+
+---
+
+## What's new in v1.2.2
+
+### CI-friendly exit codes — `socc check --strict`
+
+By default, `socc check` exits **0** for warnings and info (only errors produce exit 3).
+This means CI pipelines don't fail because of pre-existing BSP style warnings.
+
+`--strict` restores the full granular behaviour for teams that want zero warnings:
+
+```bash
+# Default — warnings are printed, not fatal:
+socc check board.dts --soc rk3588
+echo $?   # 0 even if there are warnings
+
+# Strict — warnings fail the build:
+socc check board.dts --soc rk3588 --strict
+echo $?   # 2 if warnings, 3 if errors
+```
+
+### Offline rule lookup — `socc explain CODE`
+
+Look up any rule code instantly, without a DTS file:
+
+```bash
+socc explain BW-101
+```
+
+```
+╭────────────────── BW-101 ──────────────────╮
+│ Code:      BW-101                          │
+│ Severity:  WARNING                         │
+│ Rule name: DDR Bandwidth Saturation Risk   │
+│                                            │
+│ What this rule checks                      │
+│   The sum of enabled high-bandwidth …      │
+╰────────────────────────────────────────────╯
+```
+
+Renders with `rich` if installed, falls back to plain text automatically.
+Unknown codes print the list of valid codes and exit 1.
+
+### Noise-free review diffs — `socc smart-diff --semantic`
+
+The existing `smart-diff` already ignores labels, comments, and phandle
+renumbering. `--semantic` goes one step further: it filters the output to show
+only **hardware-relevant property changes** — clock frequencies, register
+addresses, supply rails, interrupt lines, pin-control settings, etc.
+
+```bash
+socc smart-diff vendor.dts mainline.dts --semantic
+```
+
+Changes to `linux,phandle`, node ordering, and non-critical DTS metadata are
+silently dropped. The remaining diff is exactly what a hardware review needs.
+
+Hardware-critical properties kept by `--semantic`:
+`compatible`, `reg`, `status`, `clocks`, `clock-frequency`, `assigned-clock-rates`,
+`interrupts`, `*-supply`, `*-microvolt`, `bus-width`, `pinctrl-*`, `resets`,
+`power-domains`, `max-link-speed`, `num-lanes`, `*-gpio`, `*-gpios`.
 
 ---
 

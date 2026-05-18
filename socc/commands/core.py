@@ -21,12 +21,23 @@ from socc.commands._shared import (
 _EXIT_CODES = {"error": 3, "warning": 2, "info": 1}
 
 
-def _compute_exit_code(violations: list) -> int:
-    """Return the exit code for *violations* (0 = all clear)."""
+def _compute_exit_code(violations: list, strict: bool = False) -> int:
+    """Return the exit code for *violations* (0 = all clear).
+
+    Default (non-strict): only errors produce a non-zero exit (exit 3).
+    Warnings and info messages are printed but do not block CI.
+
+    With strict=True: warnings also produce a non-zero exit (exit 2),
+    info produces exit 1 — matching the full granular behaviour.
+    """
     if not violations:
         return 0
-    worst = max(_EXIT_CODES.get(v.severity, 0) for v in violations)
-    return worst
+    if strict:
+        worst = max(_EXIT_CODES.get(v.severity, 0) for v in violations)
+        return worst
+    # Default: only errors are fatal
+    has_error = any(_EXIT_CODES.get(v.severity, 0) >= 3 for v in violations)
+    return 3 if has_error else 0
 
 
 # ── check ──────────────────────────────────────────────────────────────────
@@ -63,9 +74,11 @@ def _compute_exit_code(violations: list) -> int:
               help="Load additional rule plugins from DIR (can be repeated).")
 @click.option("--since", "git_since", default=None, metavar="REF",
               help="Only check DTS files changed since this git ref (e.g. HEAD~1, main).")
+@click.option("--strict", is_flag=True, default=False,
+              help="Exit non-zero for warnings (default: only errors produce a non-zero exit).")
 def check(dts_file, soc, output_format, min_severity, ignore_rule,
           skip_rules, color, demo, netlist_csv, watch, no_cache,
-          rules_dirs, git_since):
+          rules_dirs, git_since, strict):
     """Check a device tree for SoC consistency violations."""
     import os, time, hashlib
 
@@ -186,7 +199,7 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
         report = checker.generate_report(violations, resolved_format, color=use_color)
         click.echo(report)
 
-        return _compute_exit_code(violations)
+        return _compute_exit_code(violations, strict=strict)
 
     if watch:
         if not dts_file:
@@ -413,6 +426,74 @@ def diff(before_dts: str, after_dts: str, soc: Optional[str],
         raise SystemExit(exit_code)
 
 
+# ── semantic diff filter ─────────────────────────────────────────────────────
+# Properties that actually affect hardware behaviour — used by --semantic.
+_HW_CRITICAL_PROPS = frozenset({
+    "compatible", "reg", "status", "clocks", "clock-frequency",
+    "assigned-clocks", "assigned-clock-rates", "assigned-clock-parents",
+    "interrupts", "interrupt-parent", "interrupts-extended",
+    "resets", "reset-gpios",
+    "power-domains",
+    "bus-width", "max-link-speed", "num-lanes",
+    "gpio",
+    "pinctrl-0", "pinctrl-1",
+    "dmas", "dma-channels",
+    "iommus",
+})
+# Wildcard suffixes (matched with str.endswith)
+_HW_SUFFIX = ("-supply", "-microvolt", "-microamp", "-ohms", "-gpio", "-gpios")
+# Wildcard prefixes (matched with str.startswith)
+_HW_PREFIX = ("pinctrl-",)
+
+
+def _is_hw_critical(prop: Optional[str]) -> bool:
+    """Return True if *prop* is hardware-relevant."""
+    if prop is None:
+        return False
+    if prop in _HW_CRITICAL_PROPS:
+        return True
+    for s in _HW_SUFFIX:
+        if prop.endswith(s):
+            return True
+    for p in _HW_PREFIX:
+        if prop.startswith(p):
+            return True
+    return False
+
+
+def _apply_semantic_filter(report: "SmartDiffReport") -> "SmartDiffReport":  # type: ignore[name-defined]
+    """Return a copy of *report* with only hardware-relevant changes.
+
+    Keeps:
+    - CHANGED entries on hardware-critical properties
+    - ADDED / REMOVED whole-node entries only when the node contains or
+      changes a hardware-critical property (they are kept as-is because the
+      content is meaningful — structural duplicates come from phandle nodes
+      that the normaliser already strips)
+
+    Discards:
+    - ADDED / REMOVED entries for individual properties that are not
+      hardware-relevant
+    - CHANGED entries for non-hardware properties
+    """
+    from dataclasses import replace, fields
+    from socc.smartdiff import SmartDiffReport
+
+    kept = []
+    for entry in report.entries:
+        if entry.kind == "CHANGED" and _is_hw_critical(entry.prop):
+            kept.append(entry)
+        elif entry.kind in ("ADDED", "REMOVED") and entry.prop is None:
+            # Whole-node add/remove — keep to show structural change
+            kept.append(entry)
+        # prop-level ADDED/REMOVED for non-hw props → dropped (label/phandle noise)
+        elif entry.kind in ("ADDED", "REMOVED") and _is_hw_critical(entry.prop):
+            kept.append(entry)
+
+    filtered = SmartDiffReport(path_a=report.path_a, path_b=report.path_b, entries=kept)
+    return filtered
+
+
 # ── smart-diff ───────────────────────────────────────────────────────────────
 
 @click.command("smart-diff")
@@ -422,12 +503,19 @@ def diff(before_dts: str, after_dts: str, soc: Optional[str],
               type=click.Choice(["text", "markdown", "json"]))
 @click.option("--color/--no-color", default=True)
 @click.option("-o", "--output", default=None)
+@click.option("--semantic", is_flag=True, default=False,
+              help="Only report changes to hardware-relevant properties "
+                   "(ignores label renames, comment edits, phandle renumbering, "
+                   "and purely structural node additions/removals).")
 def smart_diff(file_a: str, file_b: str, output_format: str,
-               color: bool, output: Optional[str]):
+               color: bool, output: Optional[str], semantic: bool):
     """Semantic diff of two device tree files (.dts or .dtb).
 
     Strips labels, comments, phandle values, and node ordering — comparing
     only the hardware-relevant semantic content.
+
+    Use --semantic to further filter out ADDED/REMOVED structural noise and
+    focus exclusively on hardware-critical property value changes.
     """
     from socc.smartdiff import smart_diff as _smart_diff
     from socc.smartdiff import render_diff_text, render_diff_markdown, render_diff_json, DTBDecodeError
@@ -436,6 +524,9 @@ def smart_diff(file_a: str, file_b: str, output_format: str,
     except DTBDecodeError as e:
         click.echo(f"[ERROR] {e}", err=True)
         raise SystemExit(1)
+
+    if semantic:
+        report = _apply_semantic_filter(report)
 
     if output_format == "markdown":
         text = render_diff_markdown(report)
@@ -465,13 +556,81 @@ def smart_diff(file_a: str, file_b: str, output_format: str,
               help="List all documented hardware blocks in the knowledge base.")
 def explain(node_or_name: str, dts_file: Optional[str],
             soc: Optional[str], list_kb: bool):
-    """Explain a DTS node — hardware block, clocks, IRQ, and datasheet location."""
+    """Explain a DTS node or a rule code.
+
+    \b
+    Examples:
+        socc explain BW-101                         # explain a rule
+        socc explain uart0 board.dts --soc rk3588   # explain a DTS node
+        socc explain --list                         # list all known blocks
+    """
+    import re as _re
     from socc.explain import explain_node, render_explain, list_knowledge_base
+
     if list_kb:
         click.echo(list_knowledge_base())
         return
+
+    # ── Rule-code mode: argument looks like "BW-101" or "CK-106" ────────────
+    if _re.fullmatch(r'[A-Z][A-Z0-9]+-\d+', node_or_name):
+        registry = build_registry()
+        matched = [r for r in registry.list_all_rules() if r.code == node_or_name]
+        if not matched:
+            # fuzzy fallback: prefix match
+            matched = [r for r in registry.list_all_rules()
+                       if r.code.startswith(node_or_name.split("-")[0])]
+        if not matched:
+            click.echo(
+                click.style(f"No rule found for code {node_or_name!r}.", fg="red"),
+                err=True,
+            )
+            click.echo("Try 'socc rules' to list all available codes.", err=True)
+            raise SystemExit(1)
+
+        rule = matched[0]
+        _sev_color = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
+            rule.severity, "white"
+        )
+
+        # Try to use rich; fall back to plain text
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.markdown import Markdown
+
+            console = Console()
+            sev_label = click.style(rule.severity.upper(), fg=_sev_color, bold=True)
+            body = (
+                f"**Code:** `{rule.code}`  \n"
+                f"**Severity:** {rule.severity.upper()}  \n"
+                f"**Rule name:** {rule.name}\n\n"
+                f"---\n\n"
+                f"### What this rule checks\n{rule.description}\n\n"
+            )
+            if hasattr(rule, "impact") and rule.impact:
+                body += f"### Impact if violated\n{rule.impact}\n\n"
+            if hasattr(rule, "suggestion") and rule.suggestion:
+                body += f"### How to fix\n{rule.suggestion}\n\n"
+            console.print(Panel(Markdown(body), title=f"[bold]{rule.code}[/bold]",
+                                border_style=_sev_color))
+        except ImportError:
+            # rich not installed — plain text
+            sep = "=" * 72
+            click.echo(sep)
+            click.echo(f"  {rule.code}  [{rule.severity.upper()}]  {rule.name}")
+            click.echo(sep)
+            click.echo(f"\nDescription:\n  {rule.description}\n")
+            if hasattr(rule, "impact") and rule.impact:
+                click.echo(f"Impact:\n  {rule.impact}\n")
+            if hasattr(rule, "suggestion") and rule.suggestion:
+                click.echo(f"Fix:\n  {rule.suggestion}\n")
+            click.echo(sep)
+        return
+
+    # ── DTS-node mode (original behaviour) ───────────────────────────────────
     if dts_file is None:
-        click.echo("Error: DTS_FILE is required unless --list is used.", err=True)
+        click.echo("Error: DTS_FILE is required unless explaining a rule code or using --list.",
+                   err=True)
         raise SystemExit(1)
     soc_name = soc or auto_detect_soc(Path(dts_file).name)
     try:
