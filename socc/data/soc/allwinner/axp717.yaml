@@ -1,0 +1,100 @@
+pmic: AXP717
+vendor: X-Powers
+description: "AXP717 — PMIC for Allwinner H700/A523/A527/H618; used on Orange Pi Zero 2W, BPI-M4 Berry"
+i2c_addr: "0x34"
+compatible: "x-powers,axp717"
+note: "AXP717 is the successor to AXP313A/AXP818 for sun50i/sun55i SoCs; supports DVS and USB PD input"
+
+dcdc:
+  - channel: DCDC1
+    name: "DCDC1"
+    range_v: [0.5, 1.54]
+    step_mv: 10
+    description: "VDD-CPU — CPU core voltage (DVS)"
+    note: "Supports DVS voltage scaling for DVFS"
+  - channel: DCDC2
+    name: "DCDC2"
+    range_v: [0.5, 1.54]
+    step_mv: 10
+    description: "VDD-GPU — GPU and DRAM core voltage"
+  - channel: DCDC3
+    name: "DCDC3"
+    range_v: [0.5, 1.84]
+    step_mv: 10
+    description: "AVCC / VDD-DRAM — LPDDR4 core voltage (1.1V)"
+  - channel: DCDC4
+    name: "DCDC4"
+    range_v: [0.5, 3.6]
+    step_mv: 25
+    description: "VCC-3V3 — main 3.3V system rail"
+
+aldo:
+  - channel: ALDO1
+    name: "ALDO1"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-1V8-SYS — system 1.8V rail (CCU, PIO, eMMC VCC18)"
+  - channel: ALDO2
+    name: "ALDO2"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-3V3-SDCARD or VCC-MIPI"
+  - channel: ALDO3
+    name: "ALDO3"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-PL — always-on PMU/RTC bank supply"
+    note: "Must stay on during deep sleep (S5 state)"
+  - channel: ALDO4
+    name: "ALDO4"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "AVDD-USB / VCC-PHY 1.8V"
+
+bldo:
+  - channel: BLDO1
+    name: "BLDO1"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-HDMI 3V3 or LCD backlight"
+  - channel: BLDO2
+    name: "BLDO2"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-CODEC — audio codec supply"
+  - channel: BLDO3
+    name: "BLDO3"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-GPIO-PC — PC bank 1.8V supply (must not exceed 1.98V)"
+    note: "PC bank is strictly 1.8V — BLDO3 must be 1.8V, never 3.3V"
+  - channel: BLDO4
+    name: "BLDO4"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-Wi-Fi or general 1.8V"
+
+cldo:
+  - channel: CLDO1
+    name: "CLDO1"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-SD — SD-card VCC switchable 3.3V / 1.8V"
+    note: "Use with regulator-min/max to enable 1.8V UHS-I signalling"
+  - channel: CLDO2
+    name: "CLDO2"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-SENSOR / VCC-TP"
+  - channel: CLDO3
+    name: "CLDO3"
+    range_v: [0.5, 3.5]
+    step_mv: 50
+    description: "VCC-CVBS or general LDO"
+
+constraints:
+  - rule: "DCDC1 (VDD-CPU) must not exceed 1.3V under normal load; 1.54V is absolute maximum"
+  - rule: "DCDC3 = 1.1V for LPDDR4X (sun55i reference design)"
+  - rule: "BLDO3 feeding PC-bank MUST be exactly 1.8V — connecting 3.3V will damage SoC IO"
+  - rule: "ALDO3 (VCC-PL) must remain enabled during S2/S3 suspend to preserve RTC state"
+  - rule: "CLDO1 regulator-min-microvolt=1800000 and regulator-max-microvolt=3300000 for SD UHS-I"

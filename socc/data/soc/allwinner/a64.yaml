@@ -1,0 +1,177 @@
+# Allwinner A64 SoC constraint definitions
+# CPU: 4x Cortex-A53 (up to 1.152 GHz) - sun50iw1p1
+# GPU: Mali-400 MP2
+# Used in: Pine A64, Pine A64+, Pinebook, SOPine, TERES-I, Bananapi M64
+# Compatible string: allwinner,sun50i-a64
+# Source: mainline Linux arch/arm64/boot/dts/allwinner/
+
+soc:
+  name: sun50i-a64
+  version: "1.0"
+  description: "Allwinner A64 ARM Cortex-A53 SoC (sun50iw1)"
+
+power_domains:
+  - name: PD_CPU
+    voltage_range: [0.9, 1.3]
+    description: "CPU Core Power Domain (AXP803 DCDC2)"
+    regulators:
+      - dcdc2     # AXP803 DCDC2 = VDD_CPUX
+
+  - name: PD_GPU
+    voltage_range: [0.9, 1.1]
+    description: "GPU / SoC Core Power (AXP803 DCDC1)"
+    regulators:
+      - dcdc1     # AXP803 DCDC1 = VDD_SYS
+
+  - name: PD_VCC_IO
+    voltage_range: [2.85, 3.3]
+    description: "3.3V IO Power (AXP803 DCDC5)"
+    regulators:
+      - dcdc5     # AXP803 DCDC5 = VCC-IO
+
+  - name: PD_VCC_1V8
+    voltage_range: [1.62, 1.98]
+    description: "1.8V IO Power (AXP803 LDO)"
+    regulators:
+      - ldo1
+
+  - name: PD_DRAM
+    voltage_range: [1.3, 1.5]
+    description: "LPDDR3 Power Domain (AXP803 DCDC4)"
+    regulators:
+      - dcdc4
+
+clock_providers:
+  - name: ccu
+    type: ccu
+    base: 0x01C20000
+    compatible: "allwinner,sun50i-a64-ccu"
+    description: "A64 Clock Control Unit"
+    outputs:
+      - clk_i2c0
+      - clk_i2c1
+      - clk_i2c2
+      - clk_spi0
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+      - clk_uart3
+      - clk_uart4
+      - clk_emac
+      - clk_mmc0
+      - clk_mmc1
+      - clk_mmc2
+      - clk_usb0
+      - clk_usb1
+      - clk_de
+
+  - name: r_ccu
+    type: ccu
+    base: 0x01F01400
+    compatible: "allwinner,sun50i-a64-r-ccu"
+    description: "A64 R_CCU (always-on)"
+    outputs:
+      - clk_r_apb
+      - clk_r_pio
+      - clk_r_uart
+      - clk_r_rsb    # RSB bus for AXP803
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 9600
+    max: 4000000
+
+  spi_clk_range:
+    min_freq: 3000000
+    max_freq: 100000000
+
+gpio_banks:
+  - bank: B
+    base: 0x01C20800
+    pins: 10
+    voltage: 3.3
+    compatible: "allwinner,sun50i-a64-pinctrl"
+    description: "Port B (PB0-PB9)"
+
+  - bank: C
+    base: 0x01C20800
+    pins: 19
+    voltage: 3.3
+    description: "Port C (PC0-PC18) - eMMC/NAND"
+
+  - bank: D
+    base: 0x01C20800
+    pins: 25
+    voltage: 3.3
+    description: "Port D (PD0-PD24) - LCD"
+
+  - bank: E
+    base: 0x01C20800
+    pins: 18
+    voltage: 3.3
+    description: "Port E (PE0-PE17) - CSI Camera"
+
+  - bank: F
+    base: 0x01C20800
+    pins: 6
+    voltage: 3.3
+    description: "Port F (PF0-PF5) - SD card"
+
+  - bank: G
+    base: 0x01C20800
+    pins: 14
+    voltage: 1.8
+    description: "Port G (PG0-PG13) - WiFi/BT, 1.8V"
+
+  - bank: H
+    base: 0x01C20800
+    pins: 11
+    voltage: 3.3
+    description: "Port H (PH0-PH10)"
+
+device_constraints:
+  i2c0:
+    required_clocks: [clk_i2c0]
+    required_supplies: [vcc_io]
+    max_pins: 2
+    max_frequency: 400000
+
+  rsb:
+    required_clocks: [clk_r_rsb]
+    required_supplies: [vcc_io]
+    max_pins: 2
+    description: "Reduced Serial Bus (AXP803 PMIC interface)"
+
+  spi0:
+    required_clocks: [clk_spi0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 100000000
+
+  uart0:
+    required_clocks: [clk_uart0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 4000000
+
+power_tree_constraints:
+  root_supplies:
+    - vcc_5v
+    - vcc_bat    # Battery (optional)
+
+  pmic_outputs:
+    - dcdc1    # VDD_SYS (0.9-1.2V)
+    - dcdc2    # VDD_CPUX
+    - dcdc3    # VDD_DDR / DRAM
+    - dcdc4    # VCC-DRAM (A64 variant)
+    - dcdc5    # VCC-IO 3.3V
+    - ldo1     # 1.8V / 3.3V IO
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial A64 constraints based on mainline DTS and AXP803/sun50iw1 docs"

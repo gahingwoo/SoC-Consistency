@@ -6,8 +6,7 @@ build-backend = "setuptools.build_meta"
 include = ["socc*"]
 
 [tool.setuptools.package-data]
-"socc" = ["py.typed"]
-"data" = ["**/*.yaml", "**/*.dts"]
+"socc" = ["py.typed", "data/**/*.yaml"]
 
 [project]
 name = "soc-consistency"

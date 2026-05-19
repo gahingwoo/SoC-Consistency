@@ -1,0 +1,161 @@
+# Rockchip RK3576 SoC constraint definitions
+# CPU: 4x Cortex-A72 (up to 2.2 GHz) + 4x Cortex-A53 (up to 1.8 GHz)
+# GPU: Mali-G52 MC3 (up to 850 MHz)
+# Source: mainline Linux rk3576.dtsi (v6.12+)
+
+soc:
+  name: rk3576
+  version: "1.0"
+  description: "Rockchip RK3576 big.LITTLE ARM SoC"
+
+power_domains:
+  - name: PD_CPU_BIGCORE
+    voltage_range: [0.75, 1.05]
+    description: "Big-core (Cortex-A72) Power Domain"
+    regulators:
+      - vdd_cpu_big
+
+  - name: PD_CPU_LITCORE
+    voltage_range: [0.75, 1.0]
+    description: "Little-core (Cortex-A53) Power Domain"
+    regulators:
+      - vdd_cpu_lit
+
+  - name: PD_GPU
+    voltage_range: [0.625, 0.9]
+    description: "GPU (Mali-G52 MC3) Power Domain"
+    regulators:
+      - vdd_gpu
+
+  - name: PD_NPU
+    voltage_range: [0.625, 0.9]
+    description: "NPU Power Domain"
+    regulators:
+      - vdd_npu
+
+  - name: PD_VIO
+    voltage_range: [1.8, 3.3]
+    description: "Video/Display IO Power Domain"
+    regulators:
+      - vcc_io_vio
+
+  - name: PD_LOGIC
+    voltage_range: [0.75, 0.9]
+    description: "Logic Power Domain"
+    regulators:
+      - vdd_logic
+
+clock_providers:
+  - name: cru
+    type: cru
+    base: 0xFF010000
+    description: "Main Clock Reset Unit"
+    outputs:
+      - apll
+      - cpll
+      - gpll
+      - npll
+      - clk_i2c0
+      - clk_i2c1
+      - clk_i2c2
+      - clk_spi0
+      - clk_spi1
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+
+  - name: pmu_cru
+    type: cru
+    base: 0xFF400000
+    description: "PMU Clock Reset Unit"
+    outputs:
+      - clk_32k
+      - clk_osc0
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 115200
+    max: 4000000
+
+  spi_clk_range:
+    min_freq: 1000000
+    max_freq: 200000000   # 200 MHz (RK3576 supports higher SPI rates)
+
+gpio_banks:
+  - bank: 0
+    base: 0xFF228000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 0"
+
+  - bank: 1
+    base: 0xFF240000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 1"
+
+  - bank: 2
+    base: 0xFF250000
+    pins: 32
+    voltage: 1.8
+    description: "GPIO Bank 2 (1.8V)"
+
+  - bank: 3
+    base: 0xFF260000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 3"
+
+  - bank: 4
+    base: 0xFF270000
+    pins: 32
+    voltage: 3.3
+    description: "GPIO Bank 4"
+
+device_constraints:
+  i2c0:
+    required_clocks: [clk_i2c0, pclk_i2c0]
+    required_supplies: [vcc_io]
+    max_pins: 2
+    max_frequency: 400000
+
+  i2c1:
+    required_clocks: [clk_i2c1, pclk_i2c1]
+    required_supplies: [vcc_io]
+    max_pins: 2
+    max_frequency: 400000
+
+  spi0:
+    required_clocks: [clk_spi0, pclk_spi0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 200000000
+
+  uart0:
+    required_clocks: [clk_uart0, pclk_uart0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 4000000
+
+power_tree_constraints:
+  root_supplies:
+    - vbat
+    - vin_sys
+
+  pmic_outputs:
+    - vdd_cpu_big
+    - vdd_cpu_lit
+    - vdd_gpu
+    - vdd_npu
+    - vdd_logic
+    - vcc_io       # 3.3V IO
+    - vcc_1v8      # 1.8V IO
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial RK3576 constraints based on mainline v6.12 rk3576.dtsi"

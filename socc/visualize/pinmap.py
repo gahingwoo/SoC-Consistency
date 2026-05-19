@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import html
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -80,12 +81,20 @@ def _load_bga_data(soc_name: str, data_dir: Optional[str] = None) -> Dict[str, A
 
     Returns the ``bga`` section dict, or empty dict if not found.
     """
-    if data_dir is None:
-        # Locate relative to this file: ../../data/soc/
-        here = Path(__file__).parent
-        data_dir = str(here.parent.parent / "data")
-
     soc_lower = soc_name.lower()
+
+    # Validate to prevent path traversal (OWASP A01)
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_\-]*$', soc_lower):
+        return {}
+
+    if data_dir is None:
+        # Primary: inside the socc package (included in wheels via package-data)
+        here = Path(__file__).parent  # socc/visualize/
+        pkg_data = here.parent / "data"  # socc/data/
+        if not pkg_data.exists():
+            # Fallback: project-root data/ (editable installs, development)
+            pkg_data = here.parent.parent / "data"
+        data_dir = str(pkg_data)
 
     # vendor heuristic from SoC name prefix
     if soc_lower.startswith("rk") or soc_lower.startswith("px"):

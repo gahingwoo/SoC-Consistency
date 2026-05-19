@@ -1,0 +1,71 @@
+soc: sm8250
+compatible: "qcom,sm8250"
+description: "Qualcomm Snapdragon 865 — 1x Kryo 585 Prime + 3x Gold + 4x Silver (A77/A55)"
+cpu:
+  prime_cores: 1
+  prime_type: kryo-585-prime
+  gold_cores: 3
+  gold_type: kryo-585-gold
+  silver_cores: 4
+  silver_type: kryo-585-silver
+  max_freq_prime_mhz: 2840
+  max_freq_gold_mhz: 2420
+  max_freq_silver_mhz: 1800
+gpu:
+  type: adreno-650
+gcc:
+  base: 0x00177000
+  compatible: "qcom,sm8250-gcc"
+rpmh_clk:
+  compatible: "qcom,sm8250-rpmh-clk"
+rpmpd:
+  compatible: "qcom,sm8250-rpmhpd"
+tlmm:
+  base: 0x0F100000
+  compatible: "qcom,sm8250-tlmm"
+  gpio_count: 180
+spmi_bus:
+  base: 0x0C000000
+  compatible: "qcom,spmi-pmic-arb"
+gpio_banks:
+  - bank: tlmm
+    voltage_v: 1.8
+    note: "TLMM default 1.8V; configurable per group"
+power_domains:
+  - name: cx
+    required: true
+    description: "Core logic rail"
+  - name: mx
+    required: true
+    description: "Memory interface rail"
+  - name: mmcx
+    description: "Multimedia CX (display, camera)"
+  - name: mxc
+    description: "MXC rail — new in SM8250"
+  - name: gfx
+    description: "GPU voltage rail"
+pmic:
+  name: PM8150
+  description: "Qualcomm PM8150 PMIC (SPMI)"
+  key_rails:
+    - name: vdd_cx
+      description: "CX domain"
+    - name: vdd_mx
+      description: "MX domain"
+    - name: vdd_gfx
+      description: "GPU rail"
+clocks:
+  max_cpu_prime_hz: 2840000000
+  max_cpu_gold_hz: 2420000000
+  max_cpu_silver_hz: 1800000000
+  max_gpu_hz: 587000000
+  ref_hz: 19200000
+subsystems:
+  - name: adsp
+    description: "Audio DSP"
+  - name: cdsp
+    description: "Compute DSP"
+  - name: slpi
+    description: "Sensor Low-Power Island"
+  - name: npu
+    description: "Neural Processing Unit (Hexagon Tensor)"

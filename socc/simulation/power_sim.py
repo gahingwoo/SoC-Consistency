@@ -105,6 +105,12 @@ class PowerStateMachine:
             reg = self.power_tree.nodes[reg_name]
 
             # ── PS-003: check parent is ON before enabling child ──────────────
+            # NOTE: _topo_order() always processes parents before children,
+            # so this check never fires when called from simulate_boot() in a
+            # well-formed tree.  It IS reachable when callers manipulate
+            # self.states directly (e.g. tests that patch individual states)
+            # before calling simulate_boot(), making it a useful guard for
+            # externally-triggered out-of-order sequences.
             if reg.parent and reg.parent in self.power_tree.nodes:
                 parent_state = self.states[reg.parent]
                 if parent_state != RegulatorState.ON:

@@ -1,0 +1,126 @@
+pmic: AXP803
+vendor: X-Powers
+description: "AXP803 — PMIC for Allwinner A64, H6; used on Pine A64, SOPINE, ROCK64 variants"
+i2c_addr: "0x34"
+compatible: "x-powers,axp803"
+note: "AXP803 is a highly integrated PMU for mobile and embedded A-series Allwinner SoCs"
+
+dcdc:
+  - channel: DCDC1
+    name: "DCDC1"
+    range_v: [1.6, 3.4]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-3V3 main 3.3V rail — GPIO, peripherals"
+    note: "Must always be on; drives most SoC IOs"
+  - channel: DCDC2
+    name: "DCDC2"
+    range_v: [0.5, 1.3]
+    step_mv: 10
+    default_v: 1.1
+    description: "VDD-CPUA — Cortex-A53 CPU voltage (DVS)"
+  - channel: DCDC3
+    name: "DCDC3"
+    range_v: [0.5, 1.3]
+    step_mv: 10
+    default_v: 1.1
+    description: "VDD-CPUB — reserved for big-LITTLE second cluster (if present)"
+  - channel: DCDC4
+    name: "DCDC4"
+    range_v: [0.5, 1.3]
+    step_mv: 10
+    default_v: 1.1
+    description: "VDD-GPU — Mali GPU core voltage"
+  - channel: DCDC5
+    name: "DCDC5"
+    range_v: [0.8, 1.84]
+    step_mv: 10
+    default_v: 1.5
+    description: "VCC-DDR — LPDDR3/LPDDR4 core voltage"
+  - channel: DCDC6
+    name: "DCDC6"
+    range_v: [0.6, 1.52]
+    step_mv: 10
+    default_v: 0.9
+    description: "VDD-SYS — system core logic, CCI, interconnect"
+
+aldo:
+  - channel: ALDO1
+    name: "ALDO1"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "AVCC — analog power (DRAM PHY, USB PLL)"
+  - channel: ALDO2
+    name: "ALDO2"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 1.8
+    description: "VCC-PL — always-on RTC/PMU IO bank (PL pins)"
+    note: "AXP803-AW-H6: VCC-LPDDR (1.8V for LPDDR4)"
+  - channel: ALDO3
+    name: "ALDO3"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-PG — PG GPIO bank / WiFi IO supply"
+
+dldo:
+  - channel: DLDO1
+    name: "DLDO1"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-HDMI 3V3 or camera supply"
+  - channel: DLDO2
+    name: "DLDO2"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-MIPI / display panel VCC"
+  - channel: DLDO3
+    name: "DLDO3"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 2.8
+    description: "Camera module VDD2V8"
+  - channel: DLDO4
+    name: "DLDO4"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 1.8
+    description: "Camera module VDD1V8 / MIPI CSI IO"
+
+eldo:
+  - channel: ELDO1
+    name: "ELDO1"
+    range_v: [0.7, 1.9]
+    step_mv: 50
+    default_v: 1.8
+    description: "CPVDD — PLL / CPU analog supply (1.8V)"
+  - channel: ELDO2
+    name: "ELDO2"
+    range_v: [0.7, 1.9]
+    step_mv: 50
+    default_v: 1.8
+    description: "VCC-HS-USB — USB OTG / PHY supply (1.8V)"
+  - channel: ELDO3
+    name: "ELDO3"
+    range_v: [0.7, 1.9]
+    step_mv: 50
+    default_v: 1.8
+    description: "VCC-SDCARD — SD/MMC I/O level (1.8V mode)"
+
+gpio_ldo:
+  - channel: GPIO0-LDO
+    name: "GPIO0-LDO"
+    range_v: [0.7, 3.3]
+    step_mv: 100
+    default_v: 3.3
+    description: "VCC-PE — PE GPIO bank; often used for SD-card 3V3/1V8 switch"
+
+constraints:
+  - rule: "DCDC2 must not exceed 1.3V during normal operation (A64 CPU Vmax)"
+  - rule: "VCC-DDR (DCDC5) = 1.5V for LPDDR3, 1.1V for LPDDR4X — match DRAM spec"
+  - rule: "ALDO2 drives always-on RTC domain; must remain on during suspend"
+  - rule: "DLDO/ELDO outputs feeding 1.8V banks must not be raised to 3.3V"

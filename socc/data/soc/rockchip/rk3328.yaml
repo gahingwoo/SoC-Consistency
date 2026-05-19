@@ -1,0 +1,61 @@
+soc: rk3328
+compatible: "rockchip,rk3328"
+description: "Rockchip RK3328 — 4x Cortex-A53, Mali-450 MP2"
+cpu:
+  cores: 4
+  type: cortex-a53
+  max_freq_mhz: 1296
+gpu:
+  type: mali-450-mp2
+cru:
+  base: 0xFF440000
+  compatible: "rockchip,rk3328-cru"
+gpio_banks:
+  - bank: 0
+    base: 0xFF220000
+    voltage_v: 3.3
+  - bank: 1
+    base: 0xFF230000
+    voltage_v: 3.3
+  - bank: 2
+    base: 0xFF240000
+    voltage_v: 3.3
+  - bank: 3
+    base: 0xFF250000
+    voltage_v: 3.3
+power_domains:
+  - name: PD_HEVC
+    description: "H.265 video decoder"
+  - name: PD_VPU
+    description: "Video processing unit"
+  - name: PD_VIO
+    description: "Video input/output (display)"
+pmic:
+  name: RK805
+  i2c_addr: "0x18"
+  channels:
+    - name: DCDC1
+      range_v: [0.7, 1.5]
+      description: "VDD_CPU"
+    - name: DCDC2
+      range_v: [0.7, 1.5]
+      description: "VDD_GPU"
+    - name: DCDC3
+      range_v: [0.7, 3.3]
+      description: "VDD_DDR / VCC3V0_DDR"
+    - name: DCDC4
+      range_v: [0.7, 3.3]
+      description: "VDD_3V3"
+    - name: LDO1
+      range_v: [0.8, 3.4]
+      description: "VDD_1V8 / APIO1_VCC"
+    - name: LDO2
+      range_v: [0.8, 3.4]
+      description: "VCC_1V8_RF"
+    - name: LDO3
+      range_v: [0.8, 3.4]
+      description: "VDD_1V0"
+clocks:
+  max_cpu_hz: 1296000000
+  max_gpu_hz: 500000000
+  ref_hz: 24000000

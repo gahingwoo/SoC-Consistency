@@ -1,0 +1,58 @@
+soc: qcs6490
+compatible: "qcom,qcs6490"
+description: "Qualcomm QCS6490 — 4x Kryo 670 Gold + 4x Silver, RB3 Gen2 IoT/Edge AI platform"
+cpu:
+  big_cores: 4
+  big_type: kryo-670-gold
+  little_cores: 4
+  little_type: kryo-670-silver
+  max_freq_big_mhz: 2700
+  max_freq_little_mhz: 1900
+gpu:
+  type: adreno-643
+npu:
+  description: "Hexagon 770 — integrated AI accelerator"
+gcc:
+  base: 0x00100000
+  compatible: "qcom,qcs6490-gcc"
+rpmh_clk:
+  compatible: "qcom,qcs6490-rpmh-clk"
+rpmpd:
+  compatible: "qcom,qcs6490-rpmhpd"
+tlmm:
+  base: 0x0F100000
+  compatible: "qcom,qcs6490-tlmm"
+  gpio_count: 173
+spmi_bus:
+  base: 0x0C000000
+  compatible: "qcom,spmi-pmic-arb"
+gpio_banks:
+  - bank: tlmm
+    voltage_v: 1.8
+power_domains:
+  - name: cx
+    required: true
+  - name: mx
+    required: true
+  - name: gfx
+    description: "GPU rail"
+  - name: mmcx
+    description: "Multimedia CX"
+pmic:
+  name: PMR735A
+  description: "PMIC companion on SPMI bus"
+  key_rails:
+    - name: vdd_cx
+    - name: vdd_mx
+    - name: vdd_gfx
+clocks:
+  max_cpu_big_hz: 2700000000
+  max_cpu_little_hz: 1900000000
+  max_gpu_hz: 812000000
+  ref_hz: 19200000
+subsystems:
+  - name: adsp
+  - name: cdsp
+  - name: slpi
+  - name: npu
+note: "Targets industrial/edge AI: QCS6490 = Snapdragon 778G with extended industrial support"

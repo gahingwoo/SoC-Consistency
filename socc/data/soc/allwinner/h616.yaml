@@ -1,0 +1,156 @@
+# Allwinner H616/H618/H313 SoC constraint definitions
+# CPU: 4x Cortex-A53 (up to 1.5 GHz) - sun50iw9p1
+# GPU: Mali-G31 MP2
+# Used in: Orange Pi Zero 2/3, Orange Pi Zero 2W, X96 Air, Tanix TX6S
+# Compatible strings: allwinner,sun50i-h616 / allwinner,sun50i-h618
+# Source: mainline Linux arch/arm64/boot/dts/allwinner/
+
+soc:
+  name: sun50i-h616
+  version: "1.0"
+  description: "Allwinner H616/H618 ARM SoC (sun50iw9)"
+
+power_domains:
+  - name: PD_GPU
+    voltage_range: [0.9, 1.1]
+    description: "GPU Power Domain (Mali G31)"
+    regulators:
+      - vdd_gpu
+
+  - name: PD_VCC_IO
+    voltage_range: [3.0, 3.6]
+    description: "IO Power Domain 3.3V"
+    regulators:
+      - vcc_io
+
+  - name: PD_VCC_1V8
+    voltage_range: [1.62, 1.98]
+    description: "1.8V IO Power Domain"
+    regulators:
+      - vcc_1v8
+
+  - name: PD_VCC_CPU
+    voltage_range: [0.81, 1.16]
+    description: "CPU Core Power Domain"
+    regulators:
+      - vdd_cpu
+
+clock_providers:
+  - name: ccu
+    type: ccu
+    base: 0x03001000
+    compatible: "allwinner,sun50i-h616-ccu"
+    description: "H616 Clock Control Unit"
+    outputs:
+      - clk_i2c0
+      - clk_i2c1
+      - clk_i2c2
+      - clk_i2c3
+      - clk_spi0
+      - clk_spi1
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+      - clk_uart3
+      - clk_emac0
+      - clk_usb0
+      - clk_usb1
+      - clk_mmc0
+      - clk_mmc1
+      - clk_mmc2
+
+  - name: r_ccu
+    type: ccu
+    base: 0x07010000
+    compatible: "allwinner,sun50i-h616-r-ccu"
+    description: "H616 R_CCU (always-on clock domain)"
+    outputs:
+      - clk_r_apb
+      - clk_r_pio
+      - clk_r_uart
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 9600
+    max: 4000000
+
+  spi_clk_range:
+    min_freq: 3000000
+    max_freq: 100000000
+
+gpio_banks:
+  - bank: A
+    base: 0x0300B000
+    pins: 16
+    voltage: 3.3
+    compatible: "allwinner,sun50i-h616-pinctrl"
+    description: "Port A (PA0-PA15)"
+
+  - bank: C
+    base: 0x0300B000
+    pins: 8
+    voltage: 1.8
+    description: "Port C (PC0-PC7) - SPI/MMC, 1.8V"
+
+  - bank: F
+    base: 0x0300B000
+    pins: 6
+    voltage: 3.3
+    description: "Port F (PF0-PF5) - SD card"
+
+  - bank: G
+    base: 0x0300B000
+    pins: 14
+    voltage: 1.8
+    description: "Port G (PG0-PG13) - WiFi/BT, 1.8V"
+
+  - bank: H
+    base: 0x0300B000
+    pins: 10
+    voltage: 3.3
+    description: "Port H (PH0-PH9)"
+
+device_constraints:
+  i2c0:
+    required_clocks: [clk_i2c0]
+    required_supplies: [vcc_io]
+    max_pins: 2
+    max_frequency: 400000
+
+  spi0:
+    required_clocks: [clk_spi0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 100000000
+
+  uart0:
+    required_clocks: [clk_uart0]
+    required_supplies: [vcc_io]
+    max_pins: 4
+    max_frequency: 4000000
+
+  emac0:
+    required_clocks: [clk_emac0]
+    required_supplies: [vcc_io]
+    max_pins: 14
+
+power_tree_constraints:
+  root_supplies:
+    - vcc_5v
+    - vcc_usb
+
+  pmic_outputs:
+    - vdd_cpu
+    - vdd_gpu
+    - vcc_io       # 3.3V
+    - vcc_1v8      # 1.8V
+    - vcc_ddr      # DDR power
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial H616/H618 constraints based on mainline DTS and sun50iw9 TRM"

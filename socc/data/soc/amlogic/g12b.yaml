@@ -1,0 +1,176 @@
+# Amlogic G12B (S922X / A311D) SoC constraint definitions
+# CPU: 4x Cortex-A73 (big, up to 1.8 GHz) + 2x Cortex-A53 (LITTLE, up to 1.9 GHz)
+# GPU: Mali-G52 MP6 (up to 800 MHz)
+# NPU: 5 TOPS (A311D variant) - VIM3, Khadas VIM3
+# Compatible string: amlogic,meson-g12b (S922X) / amlogic,meson-g12b-a311d (A311D)
+# Used in: Khadas VIM3, Hardkernel ODROID-N2/N2+, ArmSoM products
+# Source: mainline Linux arch/arm64/boot/dts/amlogic/
+
+soc:
+  name: meson-g12b
+  version: "1.0"
+  description: "Amlogic G12B (S922X/A311D) big.LITTLE SoC with optional NPU"
+
+power_domains:
+  - name: PD_VDD_CPU_A
+    voltage_range: [0.73, 1.0]
+    description: "Big-core Cortex-A73 power (DVFS)"
+    regulators:
+      - vdd_cpu_a
+
+  - name: PD_VDD_CPU_B
+    voltage_range: [0.73, 1.0]
+    description: "Little-core Cortex-A53 power"
+    regulators:
+      - vdd_cpu_b
+
+  - name: PD_VDD_GPU
+    voltage_range: [0.6, 0.9]
+    description: "GPU Mali-G52 MP6 power domain"
+    regulators:
+      - vdd_gpu
+
+  - name: PD_VDD_NPU
+    voltage_range: [0.7, 0.95]
+    description: "NPU power domain (A311D only)"
+    regulators:
+      - vdd_npu
+
+  - name: PD_VDD_EE
+    voltage_range: [0.85, 1.0]
+    description: "SoC EE domain logic core"
+    regulators:
+      - vdd_ee
+
+  - name: PD_VCC_3V3
+    voltage_range: [3.0, 3.6]
+    description: "3.3V peripheral IO"
+    regulators:
+      - vcc_3v3
+
+  - name: PD_VCC_1V8
+    voltage_range: [1.62, 1.98]
+    description: "1.8V IO (eMMC, DDR4)"
+    regulators:
+      - vcc_1v8
+
+  - name: PD_VDDAO
+    voltage_range: [0.9, 1.05]
+    description: "Always-On domain (survives suspend)"
+    regulators:
+      - vddao
+
+clock_providers:
+  - name: clkc
+    type: clkc
+    base: 0xFF63C000
+    compatible: "amlogic,meson-g12b-clkc"
+    description: "G12B Main Clock Controller (inherits G12A base)"
+    outputs:
+      - clk_cpu_a
+      - clk_cpu_b
+      - clk_ddr
+      - clk_eth
+      - clk_sd_emmc_a
+      - clk_sd_emmc_b
+      - clk_sd_emmc_c
+      - clk_usb
+      - clk_i2c
+      - clk_spi
+      - clk_uart0
+      - clk_uart1
+      - clk_uart2
+      - clk_pcie
+      - clk_npu
+
+  - name: ao_clkc
+    type: clkc
+    base: 0xFF800000
+    compatible: "amlogic,meson-g12b-aoclkc"
+    description: "G12B Always-On Clock Controller"
+    outputs:
+      - clk_ao_i2c
+      - clk_ao_uart
+
+clock_specifications:
+  i2c_clk_range:
+    min_freq: 100000
+    max_freq: 400000
+
+  uart_baudrate_range:
+    min: 9600
+    max: 4000000
+
+  spi_clk_range:
+    min_freq: 1000000
+    max_freq: 100000000
+
+gpio_banks:
+  - bank: GPIOZ
+    base: 0xFF634480
+    pins: 16
+    voltage: 3.3
+    compatible: "amlogic,meson-g12b-periphs-pinctrl"
+    description: "GPIOZ bank"
+
+  - bank: GPIOH
+    base: 0xFF634480
+    pins: 9
+    voltage: 3.3
+    description: "GPIOH bank"
+
+  - bank: BOOT
+    base: 0xFF634480
+    pins: 16
+    voltage: 3.3
+    description: "BOOT bank"
+
+  - bank: GPIOC
+    base: 0xFF634480
+    pins: 8
+    voltage: 1.8
+    description: "GPIOC bank (1.8V)"
+
+  - bank: GPIOA
+    base: 0xFF634480
+    pins: 16
+    voltage: 1.8
+    description: "GPIOA bank (1.8V)"
+
+  - bank: GPIOX
+    base: 0xFF634480
+    pins: 20
+    voltage: 3.3
+    description: "GPIOX bank"
+
+  - bank: GPIOAO
+    base: 0xFF800014
+    compatible: "amlogic,meson-g12b-aobus-pinctrl"
+    pins: 16
+    voltage: 3.3
+    description: "GPIOAO always-on bank"
+
+device_constraints:
+  npu:
+    required_clocks: [clk_npu]
+    required_supplies: [vdd_npu]
+    description: "5 TOPS NPU (A311D variant only)"
+
+power_tree_constraints:
+  root_supplies:
+    - vcc_5v
+
+  pmic_outputs:
+    - vdd_cpu_a
+    - vdd_cpu_b
+    - vdd_gpu
+    - vdd_npu
+    - vdd_ee
+    - vddao
+    - vcc_3v3
+    - vcc_1v8
+
+version_history:
+  - version: "1.0"
+    date: "2026-05-16"
+    description: "Initial G12B/S922X/A311D constraints based on mainline DTS"

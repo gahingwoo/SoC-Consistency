@@ -74,7 +74,7 @@ def render_text(
 
         if not filtered:
             lines.append(
-                _c(f"    No {min_severity}-level violations found.", _GREEN, use_color)
+                _c(f"    No violations found.", _GREEN, use_color)
             )
         else:
             for v in filtered:
