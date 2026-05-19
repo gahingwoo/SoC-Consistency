@@ -252,3 +252,93 @@ version_history:
   - version: "1.0"
     date: "2026-02-02"
     description: "Initial version"
+  - version: "1.1"
+    date: "2026-05-01"
+    description: "Added simulation_constraints for v1.3.0 behavioral simulation"
+
+# ── v1.3.0 Behavioral simulation constraints ──────────────────────────────────
+# Used by socc sim scenario to detect power/clock/reset sequencing violations.
+simulation_constraints:
+
+  # Power sequencing: minimum stability window before consumers may probe.
+  # The state machine flags PS-001 when a regulator's ramp+startup time is
+  # less than stable_before_consumers_ms.
+  power_sequencing:
+    - regulator: vcc_3v3
+      stable_before_consumers_ms: 5.0
+      description: "3.3V rail must stabilize before IO peripherals probe"
+    - regulator: vdd_cpu_lit
+      stable_before_consumers_ms: 2.0
+      description: "CPU-Lite supply must ramp before cores start"
+    - regulator: vdd_cpu_big0
+      stable_before_consumers_ms: 2.0
+      description: "CPU-Big0 supply must ramp before A76 cluster"
+    - regulator: vdd_cpu_big1
+      stable_before_consumers_ms: 2.0
+      description: "CPU-Big1 supply must ramp before A76 cluster"
+    - regulator: vcc_1v8
+      stable_before_consumers_ms: 3.0
+      description: "1.8V IO rail stability window"
+    - regulator: vdd_npu
+      stable_before_consumers_ms: 3.0
+      description: "NPU core supply stability window"
+  suspend_order_strict: true
+
+  # Clock gating: whether consumers must be idle before a clock can be gated.
+  # consumers_must_idle_before_gate: true  → PS-001 / CG-001 violation if not idle
+  # consumers_must_idle_before_gate: false → informational only
+  clock_gating:
+    - clock_pattern: "clk_uart"
+      consumers_must_idle_before_gate: true
+    - clock_pattern: "clk_i2c"
+      consumers_must_idle_before_gate: true
+    - clock_pattern: "clk_spi"
+      consumers_must_idle_before_gate: true
+    - clock_pattern: "clk_pcie"
+      consumers_must_idle_before_gate: true
+    - clock_pattern: "clk_usb"
+      consumers_must_idle_before_gate: true
+    - clock_pattern: "pclk_"
+      consumers_must_idle_before_gate: false
+
+  # Reset dependencies: which providers must be ready before a device's reset
+  # can be safely deasserted.  Used to detect RS-001 violations.
+  reset_dependencies:
+    - device_pattern: "i2c@"
+      requires_before_deassert:
+        - cru
+    - device_pattern: "uart@"
+      requires_before_deassert:
+        - cru
+    - device_pattern: "spi@"
+      requires_before_deassert:
+        - cru
+    - device_pattern: "pcie@"
+      requires_before_deassert:
+        - cru
+        - phy
+    - device_pattern: "usb@"
+      requires_before_deassert:
+        - cru
+        - phy
+    - device_pattern: "gmac@"
+      requires_before_deassert:
+        - cru
+    - device_pattern: "gpu@"
+      requires_before_deassert:
+        - cru
+
+  # Devices that must declare a 'resets' property (RS-002 if missing).
+  required_resets_patterns:
+    - device_pattern: "spi@"
+      required: true
+    - device_pattern: "i2c@"
+      required: true
+    - device_pattern: "uart@"
+      required: true
+    - device_pattern: "gmac@"
+      required: true
+    - device_pattern: "pcie@"
+      required: true
+    - device_pattern: "usb@"
+      required: true

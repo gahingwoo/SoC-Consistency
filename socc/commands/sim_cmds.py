@@ -285,3 +285,110 @@ def sim_migrate(from_dts: str, to_dts: Optional[str], soc: Optional[str],
         click.echo(text)
     if report.unmappable:
         raise SystemExit(1)
+
+
+# ── sim scenario ──────────────────────────────────────────────────────────────
+
+@sim_group.command("scenario")
+@click.argument("dts_file", type=click.Path(exists=True), required=False)
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None,
+              help="SoC name (auto-detected from filename if omitted).")
+@click.option("--scenario",
+              type=click.Choice(["boot", "suspend", "resume", "runtime_pm", "all"]),
+              default="all", show_default=True,
+              help="Which scenario to simulate.")
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]),
+              default="text", show_default=True)
+@click.option("--min-severity",
+              type=click.Choice(["error", "warning", "info"]),
+              default="warning", show_default=True)
+@click.option("--timeline", is_flag=True, default=False,
+              help="Include full event timeline in text output.")
+@click.option("--demo", is_flag=True,
+              help="Use built-in sample model (no DTS file needed).")
+@click.option("--color/--no-color", default=None)
+def sim_scenario(
+    dts_file: Optional[str],
+    soc: Optional[str],
+    scenario: str,
+    output_format: str,
+    min_severity: str,
+    timeline: bool,
+    demo: bool,
+    color: Optional[bool],
+):
+    """Behavioural simulation of power / clock / reset sequencing.
+
+    Runs one or all scenario state machines and reports violations:
+
+    \b
+      PS-001  Supply not stable before consumer probes (boot)
+      PS-002  Supply disabled before consumer suspends
+      PS-003  Child regulator enabled before parent stable (boot / resume)
+      CG-001  Clock gated while consumer device still active
+      CG-002  Parent clock disabled while child consumers active
+      RS-001  Reset deasserted before required provider (CRU) ready
+      RS-002  Device missing required 'resets' property
+
+    \b
+    Examples:
+        socc sim scenario board.dts --soc rk3588 --scenario suspend
+        socc sim scenario --demo --scenario all --timeline
+        socc sim scenario board.dts --format json --scenario boot
+    """
+    from socc.simulation.runner import ScenarioRunner, SCENARIOS
+    from socc.simulation._constraints import load_sim_constraints, find_soc_yaml
+    from socc.simulation._renderer import render_text, render_json
+
+    use_color = color
+
+    # ── Resolve model ─────────────────────────────────────────────────────────
+    if demo:
+        soc_name = soc or "rk3588"
+        model = build_sample_model(soc_name)
+    else:
+        if not dts_file:
+            click.echo(
+                "Error: specify a DTS file or use --demo to use the built-in sample model.",
+                err=True,
+            )
+            raise SystemExit(1)
+        soc_name = soc or auto_detect_soc(Path(dts_file).name)
+        try:
+            model = parse_dts_cached(dts_file, soc_name)
+        except Exception as exc:
+            click.echo(f"Error: {exc}", err=True)
+            raise SystemExit(1)
+
+    # ── Load constraints ──────────────────────────────────────────────────────
+    yaml_path = find_soc_yaml(soc_name)
+    constraints = load_sim_constraints(yaml_path) if yaml_path else {}
+
+    # ── Run scenario(s) ───────────────────────────────────────────────────────
+    runner = ScenarioRunner(model, constraints)
+
+    if scenario == "all":
+        results = runner.run_all()
+    else:
+        results = {scenario: runner.run(scenario)}
+
+    # ── Render ────────────────────────────────────────────────────────────────
+    src = dts_file if dts_file else "(demo)"
+    header = f"Behavioral Simulation: {soc_name}  [{src}]\n"
+
+    if output_format == "json":
+        click.echo(render_json(results))
+    else:
+        click.echo(header)
+        click.echo(render_text(
+            results,
+            min_severity=min_severity,
+            show_timeline=timeline,
+            use_color=use_color,
+        ))
+
+    # ── Exit code ─────────────────────────────────────────────────────────────
+    any_error = any(not r.is_safe for r in results.values())
+    if any_error:
+        raise SystemExit(1)

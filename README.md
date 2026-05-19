@@ -4,9 +4,9 @@
 [![Python](https://img.shields.io/pypi/pyversions/soc-consistency)](https://pypi.org/project/soc-consistency/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**socc** is a static-analysis tool that catches hardware-level bugs in Linux
-Device Tree Source (DTS) files — the kind that pass `dtc` and `dt-schema`
-validation but still destroy your board at runtime.
+**socc** is a static-analysis and behavioural-simulation tool that catches
+hardware-level bugs in Linux Device Tree Source (DTS) files — the kind that
+pass `dtc` and `dt-schema` validation but still destroy your board at runtime.
 
 If you have ever spent a week chasing a suspend-resume panic caused by a
 wrong power-supply phandle, or a silent DMA hang caused by a copy-pasted
@@ -18,6 +18,15 @@ $ socc check board.dts --soc rk3588
                   but is connected to vcc_1v8 (AO domain). System will panic on suspend.
 [ERROR]  CK-003  Clock rate mismatch — spi0 requests 50 MHz from pll_cpll (max 24 MHz).
 [WARN]   GP-002  GPIO conflict — gpio1_b3 assigned to both spi0 and uart2.
+
+$ socc sim scenario board.dts --soc rk3588 --scenario suspend
+Behavioral Simulation: rk3588  [board.dts]
+
+  Scenario: suspend
+  error[PS-002]  'vcc_io' disabled at t=4.5ms but uart0 not yet suspended
+    Detail:  Active consumers: uart0
+    Fix:     Ensure uart0 completes suspend callback before vcc_io is powered down.
+  [UNSAFE] 1 error(s), 0 warning(s)  duration=6.5ms
 ```
 
 ---
@@ -37,6 +46,7 @@ $ socc check board.dts --soc rk3588
   - [socc socdef — constraint files](#socc-socdef--constraint-files)
 - [Supported SoCs](#supported-socs)
 - [CI / CD integration](#ci--cd-integration)
+- [What's new in v1.3.0](#whats-new-in-v130)
 - [What's new in v1.2.3](#whats-new-in-v123)
 - [What's new in v1.2.2](#whats-new-in-v122)
 - [What's new in v1.2](#whats-new-in-v12)
@@ -74,6 +84,9 @@ cross-domain constraint rules that no schema can express.
 | Power/clock cycle | Regulator A requires B requires A | Kernel deadlock at boot |
 | Zombie DTS nodes | 14 disabled camera nodes in BSP | Bloated DTB, slow boot |
 | Allwinner 3.3V on 1.8V IO | Wrong PMIC rail to PC bank | Permanent IO pad damage |
+| Power rail off too early | vcc_io cut before uart0 suspend callback | Kernel panic on suspend |
+| Clock gated with active consumer | pclk_uart gated while UART TX in flight | Data corruption / hang |
+| Missing reset property | spi@ node has no `resets` | Driver cannot recover from warm reset |
 
 ---
 
@@ -128,6 +141,8 @@ socc viz power-seq board.dts                    # power-rail sequencing chart
 socc sim failure vcc_3v3 board.dts --soc rk3588 # FMEA blast radius
 socc sim shell board.dts --soc rk3588           # interactive simulator
 socc sim live-check board.dts --host 192.168.1.1 # live-board SSH audit
+socc sim scenario board.dts --soc rk3588        # behavioural power/clock/reset sim
+socc sim scenario --demo --scenario all         # try without hardware
 ```
 
 ---
@@ -314,6 +329,7 @@ socc sim COMMAND [OPTIONS]
 | `socc sim failure` | `socc simulate failure` | FMEA blast-radius simulation |
 | `socc sim smoke` | `socc simulate-smoke` | Physical-damage risk from DTS config errors |
 | `socc sim shell` | `socc shell` | Interactive power/clock state-machine shell |
+| `socc sim scenario` | *(new in v1.3.0)* | Behavioural simulation of power/clock/reset sequencing |
 | `socc sim live-check` | `socc live-check` | SSH into a board and run consistency checks |
 | `socc sim live-probe` | `socc live-probe` | Compare DTS expectations vs. physical registers |
 | `socc sim trace` | `socc trace` | Trace how a node's properties change across overlays |
@@ -526,6 +542,87 @@ socc sim shell --demo
 ```
 
 Falls back to the built-in REPL when IPython is not available.
+
+---
+
+## What's new in v1.3.0
+
+### Behavioural simulation — `socc sim scenario`
+
+v1.3.0 introduces a full behavioural (behaviour-level) simulation engine that
+models the three state machines a Linux kernel runs at every boot, suspend, and
+resume cycle: **power rail sequencing**, **clock gate/ungate cascades**, and
+**reset deassertion ordering**.
+
+Static rules (like those in `socc check`) can only see what the DTS _says_.
+The simulation engine asks what actually _happens_ at runtime — and catches
+bugs that are invisible to any static analyser.
+
+```bash
+# Simulate all 4 scenarios for a board DTS
+socc sim scenario board.dts --soc rk3588
+
+# Target one scenario with full event timeline
+socc sim scenario board.dts --soc rk3588 --scenario suspend --timeline
+
+# Machine-readable JSON output for CI
+socc sim scenario board.dts --soc rk3588 --format json
+
+# No hardware? Try the built-in demo model
+socc sim scenario --demo --scenario all
+```
+
+#### Scenarios
+
+| Scenario | Description |
+|----------|-------------|
+| `boot` | Simulate power-on and full device probe sequence |
+| `suspend` | Simulate Linux PM suspend (s2idle / deep) |
+| `resume` | Simulate resume from suspend back to active |
+| `runtime_pm` | Simulate a runtime PM autosuspend + wake cycle |
+| `all` | Run all four in sequence (default) |
+
+#### Violation codes
+
+| Code | Severity | Scenario | Description |
+|------|----------|----------|-------------|
+| `PS-001` | warning | boot | Supply does not meet required stability window before consumer probes |
+| `PS-002` | error | suspend | Supply disabled before consumer device finishes its suspend callback |
+| `PS-003` | error | boot / resume | Child regulator enabled before parent is fully stable |
+| `CG-001` | error | suspend | Clock gated (power domain off) while consumer device still active |
+| `CG-002` | error | suspend | Parent clock disabled while child clock has active consumers |
+| `RS-001` | error | boot | Device reset deasserted before required clock provider (CRU) is ready |
+| `RS-002` | warning | boot | Device missing required `resets` property (prevents safe warm reset) |
+
+#### Example output
+
+```
+Behavioral Simulation: rk3588  [board.dts]
+
+  Scenario: suspend
+  error[PS-002]  'vcc_io' disabled at t=4.5ms but 1 consumer(s) not yet suspended
+    Detail:  Active consumers: uart0
+    Fix:     Ensure uart0 completes suspend callback before vcc_io is powered down.
+             Check the regulator-off-in-suspend property ordering.
+  warning[RS-002]  Device 'spi1' missing required 'resets' property
+    Detail:  SoC database requires a resets property for spi@ devices.
+    Fix:     Add 'resets = <&cru SRST_SPI1>;' to spi1 in the DTS.
+  [UNSAFE] 1 error(s), 1 warning(s)  duration=6.5ms
+```
+
+#### Constraint-driven tuning
+
+Timing requirements and ordering rules are read from the SoC YAML file
+(`data/soc/rockchip/rk3588.yaml`, `simulation_constraints` section).  The
+shipped rk3588 constraints cover:
+
+- **power_sequencing**: `stable_before_consumers_ms` per rail (PS-001 window)
+- **clock_gating**: per-clock-pattern `consumers_must_idle_before_gate` flag
+- **reset_dependencies**: which providers (CRU, PHY) must be ready per device
+- **required_resets_patterns**: which peripheral types must declare `resets`
+
+You can add a `simulation_constraints` section to any SoC YAML file to
+get the same level of analysis for custom hardware.
 
 ---
 
