@@ -5,7 +5,7 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
-## [1.4.2] — 2025-06-23
+## [1.4.2] — 2026-05-20
 
 ### Fixed
 
