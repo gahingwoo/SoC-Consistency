@@ -358,11 +358,10 @@ class CK107AssignedClockRatesMissing(BaseRule):
                         "failure."
                     ),
                     suggestion=(
-                        f"Add 'assigned-clock-rates' to '{dev_name}' with the "
-                        "target frequency from the SoC TRM, e.g.:\n"
-                        f"  &{dev_name} {{\n"
-                        "      assigned-clock-rates = <500000000>;\n"
-                        "  }};"
+                        f"Add 'assigned-clock-rates' to '{dev_name}'. "
+                        "The exact rate is device- and SoC-specific — consult "
+                        "the SoC TRM or the upstream kernel DTS for this board "
+                        "to find the correct value."
                     ),
                     location=f"/{dev_name}",
                     affected_nodes=[dev_name],
@@ -380,11 +379,10 @@ class CK107AssignedClockRatesMissing(BaseRule):
                     ),
                     suggestion=(
                         f"Add 'assigned-clocks' and 'assigned-clock-rates' to "
-                        f"'{dev_name}':\n"
-                        f"  &{dev_name} {{\n"
-                        "      assigned-clocks = <&cru CLK_USB3>;\n"
-                        "      assigned-clock-rates = <500000000>;\n"
-                        "  }};"
+                        f"'{dev_name}'. The correct clock ID and target rate are "
+                        "device- and SoC-specific — manual review required. "
+                        "Refer to the SoC TRM and the upstream kernel DTS for "
+                        "this board (e.g. arch/arm64/boot/dts/rockchip/)."
                     ),
                     location=f"/{dev_name}",
                     affected_nodes=[dev_name],

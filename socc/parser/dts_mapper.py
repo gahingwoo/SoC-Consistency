@@ -210,8 +210,19 @@ class DTSMapper:
             # Detect power-domain controller by #power-domain-cells property only.
             # Sub-nodes named power-domain@N are domains OF the controller, not
             # controllers themselves — they lack #power-domain-cells.
-            if "#power-domain-cells" in props:
-                self._extract_power_domain(node)
+            # Leaf power-domain@N nodes have #power-domain-cells = <0x00>; only
+            # nodes with #power-domain-cells >= 1 are genuine providers (they use
+            # a specifier cell to select a sub-domain and must be modelled).
+            pd_cells_val = props.get("#power-domain-cells")
+            if pd_cells_val is not None:
+                if isinstance(pd_cells_val, list):
+                    pd_cells_val = pd_cells_val[0] if pd_cells_val else 0
+                try:
+                    pd_cells_int = int(pd_cells_val)
+                except (TypeError, ValueError):
+                    pd_cells_int = 0
+                if pd_cells_int >= 1:
+                    self._extract_power_domain(node)
             
             # recurse
             for child in node.get("children", []):

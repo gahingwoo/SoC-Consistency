@@ -24,33 +24,38 @@ from socc.rules.base import BaseRule, CheckContext
 
 
 # ── Classifier: compatible substrings for DMA-capable devices ────────────────
-# Any node whose compatible contains one of these tokens is assumed to be a
-# DMA bus master and therefore requires an ``iommus`` binding on SoCs that
-# expose an IOMMU.  Extend this set as new device classes are discovered.
+# Only IP blocks that perform DMA *directly* (not via an external DMA engine)
+# and therefore require an ``iommus`` group assignment are included.
+# Devices that use the DMA-engine subsystem (I2S, SPI, UART …) are excluded:
+# those use the DMA-engine's IOMMU group, not their own.
 
 _DMA_MASTER_TOKENS: FrozenSet[str] = frozenset({
     # GPU
     "gpu", "mali", "bifrost", "panfrost", "valhall",
-    # Video codec
+    # Video codec (integrated DMA engines, NOT pl330 clients)
     "vpu", "vdec", "venc", "vepu", "rkvdec", "rkvenc",
+    # AV1 / VP9 hardware decoder
+    "av1-vpu", "vp9-vpu",
     # Image signal processor
     "rkisp", "isp",
-    # Display / DRM
-    "vop", "display", "drm", "hdmi",
     # NPU / ML accelerator
     "npu", "rknn", "rknn-core",
-    # DMA engines
-    "dma", "pl330", "axi-dmac",
-    # USB host (XHCI uses DMA)
+    # USB host (XHCI/EHCI/DWC3 perform DMA directly)
     "xhci", "ehci", "dwc3", "dwc2",
-    # PCIe root complex
+    # PCIe root complex (DMA peer-to-peer)
     "pcie",
-    # Ethernet MAC
-    "gmac", "emac", "stmmac",
-    # Camera/sensor via DMA
+    # Ethernet MAC with integrated DMA
+    "gmac", "stmmac",
+    # Camera / MIPI-CSI DMA path
     "mipi-csi", "csi2",
-    # Audio DMA
-    "i2s", "spdif",
+})
+
+# Compatible substrings / node properties that disqualify a DMA-master match
+# even when a token above is present.
+_DMA_EXCLUDE_COMPAT: FrozenSet[str] = frozenset({
+    "grf",        # Rockchip GRF (general register file) — config syscon
+    "syscon",     # Generic system controller — no DMA
+    "-connector", # Connector stubs (hdmi-connector, etc.)
 })
 
 # Compatible substrings that identify IOMMU / SMMU controllers
@@ -70,7 +75,25 @@ def _compat_str(props: dict) -> str:
     return str(val).lower()
 
 
-def _is_dma_master(compat: str) -> bool:
+def _is_dma_master(compat: str, props: dict = None) -> bool:
+    """Return True only when the node is a direct DMA bus master.
+
+    Excludes:
+    - syscon / GRF config register banks
+    - connector stubs
+    - DMA-engine clients that declare ``dmas`` (the engine holds the IOMMU group)
+    - DMA controller nodes themselves (pl330, axi-dmac)
+    """
+    # Disqualify by compatible substring first
+    if any(exc in compat for exc in _DMA_EXCLUDE_COMPAT):
+        return False
+    # DMA controller nodes are infrastructure, not clients
+    if "pl330" in compat or "axi-dmac" in compat:
+        return False
+    # Devices that use the DMA-engine subsystem (have a 'dmas' property)
+    # are NOT direct IOMMU clients — skip them
+    if props and "dmas" in props:
+        return False
     return any(tok in compat for tok in _DMA_MASTER_TOKENS)
 
 
@@ -125,7 +148,7 @@ class DMA001MissingIommuBinding(BaseRule):
 
         for dev_name, dev_node in model.devices.items():
             compat = _compat_str(dev_node.properties)
-            if not _is_dma_master(compat):
+            if not _is_dma_master(compat, dev_node.properties):
                 continue
             if _is_iommu_controller(compat):
                 continue  # skip the controller itself

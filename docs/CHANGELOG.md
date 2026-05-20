@@ -5,6 +5,49 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.2] — 2025-06-23
+
+### Fixed
+
+- **Credibility — CK-107 suggestion text.**
+  Suggestion messages no longer contain fabricated clock IDs (`CLK_USB3`) or
+  hardcoded rates (`500000000`) that are irrelevant to HDMI, DSI, or PCIe
+  devices. Both suggestion variants now say "manual review required" and direct
+  the user to the SoC TRM and upstream kernel DTS.
+
+- **False positives — DMA-001 / SEC-201 DMA master detection.**
+  Replaced the broad substring token set with a strict allowlist of IP blocks
+  that perform DMA directly (GPU, video codecs, ISP, NPU, USB host, PCIe,
+  GMAC/STMMAC). Removed `"hdmi"`, `"i2s"`, `"spdif"`, `"dma"`, `"pl330"`,
+  `"axi-dmac"`, `"display"`, `"drm"` — all of which caused false positives.
+  Added exclusions for:
+  - `grf` / `syscon` compatibles (config register banks, not DMA devices)
+  - `-connector` compatibles (connector stubs)
+  - `pl330` / `axi-dmac` compatibles (DMA engine controllers, not clients)
+  - devices with a `dmas` property (they use the DMA engine; IOMMU belongs
+    to the engine, not the client)
+
+  Result: DMA-001 violations reduced from 26 → 9 (all true positives: GPU ×1,
+  USB ×4, AV1-VPU ×1, PCIe ×2, GMAC ×1).
+
+- **False positives — PD-006 `OrphanedRegulator` / power-domain sub-nodes.**
+  `power-domain@N` sub-nodes on RK3588 have `#power-domain-cells = <0x00>`
+  (they accept no specifier; they ARE domains, not providers). The mapper now
+  only registers a node as a power-domain provider when
+  `#power-domain-cells >= 1`. Previously the presence check caused all 28
+  sub-nodes to be registered as providers, generating 26 spurious PD-006
+  violations.
+
+### Added
+
+- **`tests/test_regression_fp.py`** — focused regression test file (14 tests)
+  locking down the most credibility-critical false-positive fixes:
+  DMA-001 exclusions (GRF, I2S/SPDIF, pl330, connectors), CK-107 token safety
+  (fusb302, usbdpphy, -phy suffix), CK-107 suggestion quality, CK-106
+  provider:spec skipping, PD-006 power-domain@N exclusion, PD-007 severity.
+
+---
+
 ## [1.4.1] — 2026-05-20
 
 ### Fixed
