@@ -161,9 +161,18 @@ def _run_dt_validate(dts_file: str, use_color=None) -> None:
 @click.option("--preprocess", "do_preprocess", is_flag=True, default=False,
               help=("Run cpp (DTS) or dtc (DTB) before parsing to expand "
                     "#include / #define / dt-bindings macros."))
+@click.option("--no-preprocess", "no_preprocess", is_flag=True, default=False,
+              help="Never preprocess; fail immediately on unprocessed or binary input.")
+@click.option("--yes", "-y", "do_yes", is_flag=True, default=False,
+              help=("Assume yes to the interactive preprocessing prompt "
+                    "(useful in scripts; equivalent to --preprocess for raw input)."))
+@click.option("--include", "include_paths", multiple=True, metavar="DIR",
+              help=("Add DIR to the cpp include search path (can be repeated). "
+                    "Example: --include /linux/include/dt-bindings"))
 def check(dts_file, soc, output_format, min_severity, ignore_rule,
           skip_rules, color, demo, netlist_csv, watch, no_cache,
-          rules_dirs, git_since, strict, dt_binding, do_preprocess):
+          rules_dirs, git_since, strict, dt_binding,
+          do_preprocess, no_preprocess, do_yes, include_paths):
     """Check a device tree for SoC consistency violations."""
     import os, time, hashlib
 
@@ -214,6 +223,16 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
             if not dts_file:
                 click.echo("Error: specify a device-tree file or use --demo", err=True)
                 return 1
+            from socc.preprocess import UnpreprocessedDTSError as _UnprepError
+
+            def _parse(preprocess_flag: bool):
+                return (
+                    parse_dts_file(dts_file, soc_name, preprocess=preprocess_flag,
+                                   include_dirs=list(include_paths))
+                    if (no_cache or preprocess_flag)
+                    else parse_dts_cached(dts_file, soc_name)
+                )
+
             try:
                 echo(f"Loading device tree: {dts_file}", color=use_color)
                 if resolved_soc == "auto":
@@ -222,11 +241,58 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
                     soc_name = resolved_soc
                 sf    = str(Path(dts_file).resolve())
                 source_text = Path(dts_file).read_text(errors="replace")
-                model = (
-                    parse_dts_file(dts_file, soc_name, preprocess=do_preprocess)
-                    if (no_cache or do_preprocess)
-                    else parse_dts_cached(dts_file, soc_name)
-                )
+
+                try:
+                    model = _parse(do_preprocess)
+                except _UnprepError as _exc:
+                    # ── decide whether to prompt or fail ─────────────────────
+                    if no_preprocess:
+                        click.echo(str(_exc), err=True)
+                        return 1
+
+                    import sys as _sys
+                    _is_tty = _sys.stdin.isatty() and _sys.stderr.isatty()
+
+                    if not do_yes and not _is_tty:
+                        # Non-interactive / CI: fail with actionable hint.
+                        click.echo(str(_exc), err=True)
+                        return 1
+
+                    # Interactive TTY (or --yes): optionally prompt then retry.
+                    if not do_yes:
+                        fname = Path(dts_file).name
+                        click.echo(
+                            click.style(
+                                f"{fname} appears to require preprocessing.",
+                                fg="yellow",
+                            ),
+                            err=True,
+                        )
+                        if not include_paths:
+                            click.echo(
+                                click.style(
+                                    "Note: no --include paths given; dt-bindings macros\n"
+                                    "  may not resolve without a kernel include tree.\n"
+                                    "  Add --include /path/to/linux/include to fix this.",
+                                    fg="yellow",
+                                ),
+                                err=True,
+                            )
+                        if not click.confirm(
+                            "Run preprocessor now?", default=False, err=True
+                        ):
+                            click.echo(
+                                click.style(
+                                    "Tip: run with --preprocess to skip this prompt.",
+                                    fg="cyan",
+                                ),
+                                err=True,
+                            )
+                            return 1
+
+                    echo("Preprocessing…", color=use_color)
+                    model = _parse(True)
+
                 echo(f"Loaded device tree (SoC: {soc_name})", color=use_color)
             except FileNotFoundError:
                 click.echo(f"Error: file not found: {dts_file!r}", err=True)

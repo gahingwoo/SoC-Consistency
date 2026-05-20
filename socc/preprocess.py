@@ -149,7 +149,7 @@ _INSTALL_HINTS: dict[str, str] = {
 
 # ── Preprocess dispatcher ────────────────────────────────────────────────────
 
-def preprocess_file(path: str) -> str:
+def preprocess_file(path: str, include_dirs: Optional[list] = None) -> str:
     """Preprocess *path* and return the resulting DTS text.
 
     Dispatch rules:
@@ -158,14 +158,15 @@ def preprocess_file(path: str) -> str:
       decompiled via ``dtc -I dtb -O dts``.
     * **DTS / DTSI** (text): run through ``cpp -x assembler-with-cpp -P``.
       The source directory is added to the include search path so that
-      relative ``#include`` references resolve correctly.
+      relative ``#include`` references resolve correctly.  Any paths in
+      *include_dirs* are prepended to the search list as well.
 
     Raises :class:`UnpreprocessedDTSError` if the required external tool is
     not installed or exits non-zero.
     """
     if is_dtb(path) or path.lower().endswith(".dtb"):
         return _dtb_to_dts(path)
-    return _cpp_preprocess(path)
+    return _cpp_preprocess(path, include_dirs=include_dirs)
 
 
 def _dtb_to_dts(path: str) -> str:
@@ -188,7 +189,7 @@ def _dtb_to_dts(path: str) -> str:
     return result.stdout
 
 
-def _cpp_preprocess(path: str) -> str:
+def _cpp_preprocess(path: str, include_dirs: Optional[list] = None) -> str:
     cpp_exe = _find_cpp()
     if not cpp_exe:
         raise UnpreprocessedDTSError(
@@ -196,9 +197,11 @@ def _cpp_preprocess(path: str) -> str:
             f"{_INSTALL_HINTS['cpp']}"
         )
     # Include the source file's directory so relative #include paths work.
+    # Then add any user-supplied include directories (e.g. kernel dt-bindings).
     src_dir = str(Path(path).parent)
+    include_flags = [f"-I{src_dir}"] + [f"-I{d}" for d in (include_dirs or [])]
     result = subprocess.run(
-        [cpp_exe, "-x", "assembler-with-cpp", "-P", f"-I{src_dir}", path],
+        [cpp_exe, "-x", "assembler-with-cpp", "-P", *include_flags, path],
         capture_output=True,
         text=True,
         timeout=30,

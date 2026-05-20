@@ -1,7 +1,7 @@
 """Parser module."""
 
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from socc.model import SoC, Regulator, Clock, ClockProvider, IRNode
 from socc.model.base import IRNode as IRNodeClass
 from socc.parser.dts_parser import parse_dts
@@ -130,7 +130,8 @@ def build_sample_model(soc_name: str = "rk3588") -> SoC:
 
 
 def parse_dts_file(dts_file_path: str, soc_name: str = "unknown",
-                   preprocess: bool = False) -> SoC:
+                   preprocess: bool = False,
+                   include_dirs: Optional[list] = None) -> SoC:
     """Parse a DTS file and return a SoC model.
 
     Args:
@@ -166,14 +167,14 @@ def parse_dts_file(dts_file_path: str, soc_name: str = "unknown",
                 f"Pass --preprocess to decompile it automatically, or run:\n"
                 f"  dtc -I dtb -O dts {path} | socc check /dev/stdin"
             )
-        content = preprocess_file(path)
+        content = preprocess_file(path, include_dirs=include_dirs)
     else:
-        # ── DTS / DTSI text file ──────────────────────────────────────────────
+        # ── DTS / DTSI text file ────────────────────────────────────
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
 
         if preprocess:
-            content = preprocess_file(path)
+            content = preprocess_file(path, include_dirs=include_dirs)
         else:
             msg = detect_unpreprocessed(content, path)
             if msg:

@@ -1311,3 +1311,122 @@ class TestIsDTB:
     def test_missing_file(self, tmp_path):
         from socc.preprocess import is_dtb
         assert is_dtb(str(tmp_path / "nonexistent.dtb")) is False
+
+
+class TestPreprocessIncludeDirs:
+    """preprocess_file / _cpp_preprocess should thread include_dirs through."""
+
+    def test_include_dirs_are_passed_to_cpp(self, tmp_path, monkeypatch):
+        """Verify that extra -I flags appear in the cpp invocation."""
+        import subprocess
+        from socc import preprocess as pp
+
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            class R:
+                returncode = 0
+                stdout = "/dts-v1/;\n/ {};\n"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(pp, "_find_cpp", lambda: "cpp")
+
+        f = tmp_path / "board.dts"
+        f.write_text("/dts-v1/;\n/ {};\n")
+        pp.preprocess_file(str(f), include_dirs=["/linux/include", "/extra"])
+
+        cmd = captured["cmd"]
+        assert "-I/linux/include" in cmd
+        assert "-I/extra" in cmd
+
+    def test_no_include_dirs_still_works(self, tmp_path, monkeypatch):
+        import subprocess
+        from socc import preprocess as pp
+
+        def fake_run(cmd, **kwargs):
+            class R:
+                returncode = 0
+                stdout = "/dts-v1/;\n/ {};\n"
+                stderr = ""
+            return R()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(pp, "_find_cpp", lambda: "cpp")
+
+        f = tmp_path / "board.dts"
+        f.write_text("/dts-v1/;\n/ {};\n")
+        result = pp.preprocess_file(str(f))
+        assert result == "/dts-v1/;\n/ {};\n"
+
+
+class TestCLIPreprocessFlags:
+    """CLI-level tests for --no-preprocess, --yes, --include using CliRunner."""
+
+    RAW_DTS = '#include <dt-bindings/gpio/gpio.h>\n/dts-v1/;\n/ { model = "T"; };\n'
+    CLEAN_DTS = '/dts-v1/;\n/ { model = "T"; compatible = "vendor,board"; };\n'
+
+    def _runner(self):
+        from click.testing import CliRunner
+        return CliRunner()
+
+    def test_no_preprocess_flag_fails_immediately(self, tmp_path):
+        from click.testing import CliRunner
+        from socc.commands.core import check
+        f = tmp_path / "raw.dts"
+        f.write_text(self.RAW_DTS)
+        result = CliRunner().invoke(check, [str(f), "--soc", "rk3588", "--no-preprocess"])
+        assert result.exit_code != 0
+        assert "--preprocess" in result.output
+
+    def test_yes_flag_triggers_preprocess_in_noninteractive(self, tmp_path, monkeypatch):
+        """--yes should bypass the TTY prompt and run the preprocessor."""
+        from click.testing import CliRunner
+        from socc.commands.core import check
+        from socc import preprocess as pp
+
+        # Monkeypatch preprocess_file to return clean DTS
+        clean = self.CLEAN_DTS
+        monkeypatch.setattr(pp, "preprocess_file", lambda path, include_dirs=None: clean)
+
+        f = tmp_path / "raw.dts"
+        f.write_text(self.RAW_DTS)
+        result = CliRunner().invoke(check, [str(f), "--soc", "rk3588", "--yes"])
+        # Should not fail with "unpreprocessed" error — preprocess was invoked
+        assert "appears unpreprocessed" not in result.output
+
+    def test_noninteractive_without_flags_fails(self, tmp_path):
+        """Without any flags in non-TTY mode, raw DTS should produce an error."""
+        from click.testing import CliRunner
+        from socc.commands.core import check
+        f = tmp_path / "raw.dts"
+        f.write_text(self.RAW_DTS)
+        # CliRunner is always non-interactive (isatty() returns False)
+        result = CliRunner().invoke(check, [str(f), "--soc", "rk3588"])
+        assert result.exit_code != 0
+        assert "unpreprocessed" in result.output or "--preprocess" in result.output
+
+    def test_include_paths_forwarded(self, tmp_path, monkeypatch):
+        """--include DIR should be forwarded to cpp."""
+        from click.testing import CliRunner
+        from socc.commands.core import check
+        from socc import preprocess as pp
+
+        captured = {}
+        def fake_preprocess(path, include_dirs=None):
+            captured["include_dirs"] = include_dirs
+            return self.CLEAN_DTS
+
+        monkeypatch.setattr(pp, "preprocess_file", fake_preprocess)
+
+        f = tmp_path / "board.dts"
+        f.write_text(self.RAW_DTS)
+        CliRunner().invoke(
+            check,
+            [str(f), "--soc", "rk3588", "--preprocess",
+             "--include", "/linux/include", "--include", "/extra"],
+        )
+        assert "/linux/include" in (captured.get("include_dirs") or [])
+        assert "/extra" in (captured.get("include_dirs") or [])

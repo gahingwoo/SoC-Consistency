@@ -5,6 +5,48 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.5] — 2026-05-20
+
+### Added
+
+- **Interactive preprocessing prompt (TTY only).** When socc detects an
+  unpreprocessed DTS and is running in an interactive terminal, it now asks:
+  ```
+  board.dts appears to require preprocessing.
+  Run preprocessor now? [y/N]
+  ```
+  Default is **N** (safe).  In CI / non-interactive environments the tool
+  still fails immediately with the full diagnostic — no prompt, fully
+  deterministic behaviour preserved.
+
+- **`--no-preprocess`** — Explicitly disables all prompting and preprocessing;
+  fails on unpreprocessed or binary input.  Use in scripts to lock down
+  behaviour.
+
+- **`-y` / `--yes`** — Assumes *yes* to the preprocessing prompt without
+  requiring an interactive terminal.  Intended for trusted scripts that know
+  the input needs preprocessing but don't want an interactive session.
+
+- **`--include DIR`** (repeatable) — Passes extra `-I<DIR>` flags to `cpp`
+  during preprocessing.  Essential when the DTS references kernel dt-bindings
+  headers:
+  ```
+  socc check board.dts --preprocess --include /linux/include
+  ```
+
+### Behaviour matrix
+
+| Situation | `--preprocess` | `--no-preprocess` | `-y` / `--yes` | Result |
+|---|---|---|---|---|
+| Clean DTS | — | — | — | Parse normally |
+| Raw DTS, TTY | — | — | — | Prompt `[y/N]` |
+| Raw DTS, CI | — | — | — | Fail + hint |
+| Raw DTS | ✓ | — | — | Preprocess silently |
+| Raw DTS | — | ✓ | — | Fail immediately |
+| Raw DTS, CI | — | — | ✓ | Preprocess silently |
+
+---
+
 ## [1.4.4] — 2026-05-20
 
 ### Added
