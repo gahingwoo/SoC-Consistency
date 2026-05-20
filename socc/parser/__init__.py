@@ -1,5 +1,6 @@
 """Parser module."""
 
+from pathlib import Path
 from typing import Dict, Any
 from socc.model import SoC, Regulator, Clock, ClockProvider, IRNode
 from socc.model.base import IRNode as IRNodeClass
@@ -128,29 +129,62 @@ def build_sample_model(soc_name: str = "rk3588") -> SoC:
     return model
 
 
-def parse_dts_file(dts_file_path: str, soc_name: str = "unknown") -> SoC:
+def parse_dts_file(dts_file_path: str, soc_name: str = "unknown",
+                   preprocess: bool = False) -> SoC:
     """Parse a DTS file and return a SoC model.
 
     Args:
-        dts_file_path: Path to the DTS file.
+        dts_file_path: Path to the DTS file (or compiled DTB when
+            ``preprocess=True``).
         soc_name: SoC name used for constraint matching.
+        preprocess: When ``True``, run an external tool (``cpp`` for DTS,
+            ``dtc`` for DTB) before parsing.  When ``False`` (default),
+            raise :class:`~socc.preprocess.UnpreprocessedDTSError` if the
+            file appears to contain unprocessed CPP directives or macros.
 
     Returns:
         Populated SoC data model.
 
     Raises:
         FileNotFoundError: If the file does not exist.
+        socc.preprocess.UnpreprocessedDTSError: If the file contains CPP
+            tokens and ``preprocess=False``, or if the external tool fails.
         SyntaxError: On DTS syntax errors.
     """
-    with open(dts_file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
+    from socc.preprocess import (
+        detect_unpreprocessed, is_dtb, preprocess_file, UnpreprocessedDTSError,
+    )
+
+    path = str(dts_file_path)
+
+    # ── DTB binary ────────────────────────────────────────────────────────────
+    if is_dtb(path) or path.lower().endswith(".dtb"):
+        if not preprocess:
+            fname = Path(path).name
+            raise UnpreprocessedDTSError(
+                f"{fname!r} is a compiled DTB (binary).  "
+                f"Pass --preprocess to decompile it automatically, or run:\n"
+                f"  dtc -I dtb -O dts {path} | socc check /dev/stdin"
+            )
+        content = preprocess_file(path)
+    else:
+        # ── DTS / DTSI text file ──────────────────────────────────────────────
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if preprocess:
+            content = preprocess_file(path)
+        else:
+            msg = detect_unpreprocessed(content, path)
+            if msg:
+                raise UnpreprocessedDTSError(msg)
+
     # parse DTS text
     dts_tree = parse_dts(content)
-    
+
     # map to SoC model
     soc = dts_to_soc(dts_tree, soc_name)
-    
+
     return soc
 
 

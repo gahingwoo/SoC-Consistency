@@ -5,6 +5,36 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.4] — 2026-05-20
+
+### Added
+
+- **Unpreprocessed DTS detection (always-on).** If a DTS file contains CPP
+  directives (`#include`, `#define`, `#ifdef`, …), DTS `/include/` syntax, or
+  unexpanded dt-bindings macros (`IRQ_TYPE_LEVEL_HIGH`, `GPIO_ACTIVE_HIGH`, …),
+  socc now immediately prints a clear diagnostic instead of silently
+  mis-parsing the file:
+  ```
+  This DTS appears unpreprocessed in 'board.dts' — found #include directive at line 1.
+  Run with --preprocess to let socc invoke cpp automatically, or preprocess manually:
+    cpp -x assembler-with-cpp -P board.dts > preprocessed.dts
+    socc check preprocessed.dts
+  ```
+  Detection is comment-aware; CPP tokens inside `/* */` or `//` comments are
+  never flagged.
+
+- **`--preprocess` flag for `socc check`.** Passes the input through an
+  external tool before parsing — no manual preprocessing step required:
+  - `.dtb` binary → decompiled via `dtc -I dtb -O dts`
+  - `.dts` / `.dtsi` → expanded via `cpp -x assembler-with-cpp -P`
+  If the required tool is absent a clear install hint is shown.
+  `--preprocess` also bypasses the parse cache so the result is always fresh.
+
+- **`socc/preprocess.py`** — new public module exposing `detect_unpreprocessed`,
+  `preprocess_file`, `is_dtb`, and `UnpreprocessedDTSError` for programmatic use.
+
+---
+
 ## [1.4.3] — 2026-05-20
 
 ### Fixed

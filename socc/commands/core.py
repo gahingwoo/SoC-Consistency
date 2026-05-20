@@ -158,9 +158,12 @@ def _run_dt_validate(dts_file: str, use_color=None) -> None:
               help="Exit non-zero for warnings (default: only errors produce a non-zero exit).")
 @click.option("--binding", "dt_binding", is_flag=True, default=False,
               help="Also run dt-validate (dt-schema) if available; merge findings.")
+@click.option("--preprocess", "do_preprocess", is_flag=True, default=False,
+              help=("Run cpp (DTS) or dtc (DTB) before parsing to expand "
+                    "#include / #define / dt-bindings macros."))
 def check(dts_file, soc, output_format, min_severity, ignore_rule,
           skip_rules, color, demo, netlist_csv, watch, no_cache,
-          rules_dirs, git_since, strict, dt_binding):
+          rules_dirs, git_since, strict, dt_binding, do_preprocess):
     """Check a device tree for SoC consistency violations."""
     import os, time, hashlib
 
@@ -220,8 +223,8 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
                 sf    = str(Path(dts_file).resolve())
                 source_text = Path(dts_file).read_text(errors="replace")
                 model = (
-                    parse_dts_file(dts_file, soc_name)
-                    if no_cache
+                    parse_dts_file(dts_file, soc_name, preprocess=do_preprocess)
+                    if (no_cache or do_preprocess)
                     else parse_dts_cached(dts_file, soc_name)
                 )
                 echo(f"Loaded device tree (SoC: {soc_name})", color=use_color)
@@ -229,7 +232,11 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
                 click.echo(f"Error: file not found: {dts_file!r}", err=True)
                 return 1
             except Exception as e:
-                click.echo(f"Error: failed to parse device tree: {e}", err=True)
+                from socc.preprocess import UnpreprocessedDTSError
+                if isinstance(e, UnpreprocessedDTSError):
+                    click.echo(str(e), err=True)
+                else:
+                    click.echo(f"Error: failed to parse device tree: {e}", err=True)
                 return 1
 
         extra_metadata: dict = {}

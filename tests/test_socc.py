@@ -1175,3 +1175,139 @@ class TestPD007Severity:
         from socc.rules.common.power_rules import PD007IOBeforeCoreSequence
         assert PD007IOBeforeCoreSequence().severity == "warning", \
             "PD-007 (IOBeforeCore) must have severity='warning'"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Preprocess bridge
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDetectUnpreprocessed:
+    """detect_unpreprocessed() should catch CPP tokens and known macros."""
+
+    from socc.preprocess import detect_unpreprocessed
+
+    CLEAN_DTS = '/dts-v1/;\n/ { model = "Test"; };\n'
+
+    def test_clean_dts_returns_none(self):
+        from socc.preprocess import detect_unpreprocessed
+        assert detect_unpreprocessed(self.CLEAN_DTS) is None
+
+    def test_hash_include_detected(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = '#include <dt-bindings/gpio/gpio.h>\n' + self.CLEAN_DTS
+        msg = detect_unpreprocessed(content, "test.dts")
+        assert msg is not None
+        assert "#include directive" in msg
+        assert "--preprocess" in msg
+
+    def test_hash_define_detected(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = '#define MY_CLK 24000000\n' + self.CLEAN_DTS
+        assert detect_unpreprocessed(content) is not None
+
+    def test_ifdef_detected(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = '#ifdef CONFIG_ARCH_RK3588\n' + self.CLEAN_DTS + '#endif\n'
+        assert detect_unpreprocessed(content) is not None
+
+    def test_dts_include_directive_detected(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = '/include/ "rk3588.dtsi"\n' + self.CLEAN_DTS
+        assert detect_unpreprocessed(content) is not None
+
+    def test_irq_macro_detected(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = (
+            '/dts-v1/;\n/ { interrupts = <IRQ_TYPE_LEVEL_HIGH 0 0>; };\n'
+        )
+        msg = detect_unpreprocessed(content)
+        assert msg is not None
+        assert "IRQ_TYPE_LEVEL_HIGH" in msg
+
+    def test_gpio_macro_detected(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = '/dts-v1/;\n/ { gpios = <&gpio0 0 GPIO_ACTIVE_HIGH>; };\n'
+        assert detect_unpreprocessed(content) is not None
+
+    def test_comment_with_include_not_flagged(self):
+        """#include inside a /* */ comment must not trigger detection."""
+        from socc.preprocess import detect_unpreprocessed
+        content = (
+            '/* #include <this-is-a-comment.h> */\n'
+            '/dts-v1/;\n/ { model = "T"; };\n'
+        )
+        assert detect_unpreprocessed(content) is None
+
+    def test_line_comment_with_define_not_flagged(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = (
+            '// #define IGNORED 1\n'
+            '/dts-v1/;\n/ { model = "T"; };\n'
+        )
+        assert detect_unpreprocessed(content) is None
+
+    def test_message_contains_manual_hint(self):
+        from socc.preprocess import detect_unpreprocessed
+        content = '#include <dt-bindings/clock/rk3588-cru.h>\n/dts-v1/;\n/ {};\n'
+        msg = detect_unpreprocessed(content, "board.dts")
+        assert "cpp" in msg
+        assert "preprocessed.dts" in msg
+
+
+class TestParseDTSFilePreprocess:
+    """parse_dts_file() raises UnpreprocessedDTSError for raw DTS/DTB."""
+
+    def test_clean_file_parsed_ok(self, tmp_path):
+        from socc.parser import parse_dts_file
+        f = tmp_path / "clean.dts"
+        f.write_text('/dts-v1/;\n/ { model = "T"; compatible = "vendor,board"; };\n')
+        soc = parse_dts_file(str(f), "test_soc")
+        assert soc is not None
+
+    def test_unpreprocessed_raises(self, tmp_path):
+        from socc.parser import parse_dts_file
+        from socc.preprocess import UnpreprocessedDTSError
+        f = tmp_path / "raw.dts"
+        f.write_text('#include <dt-bindings/gpio/gpio.h>\n/dts-v1/;\n/ {};\n')
+        with pytest.raises(UnpreprocessedDTSError) as exc_info:
+            parse_dts_file(str(f))
+        assert "--preprocess" in str(exc_info.value)
+
+    def test_dtb_extension_raises_without_preprocess(self, tmp_path):
+        from socc.parser import parse_dts_file
+        from socc.preprocess import UnpreprocessedDTSError
+        # Write valid DTS content but with .dtb name — extension check fires first
+        f = tmp_path / "board.dtb"
+        f.write_bytes(b'\xd0\x0d\xfe\xed' + b'\x00' * 60)  # DTB magic + padding
+        with pytest.raises(UnpreprocessedDTSError) as exc_info:
+            parse_dts_file(str(f))
+        err = str(exc_info.value)
+        assert "DTB" in err or "dtb" in err.lower()
+        assert "--preprocess" in err
+
+    def test_preprocess_false_is_default(self, tmp_path):
+        """Calling without preprocess= raises for raw input (default is False)."""
+        from socc.parser import parse_dts_file
+        from socc.preprocess import UnpreprocessedDTSError
+        f = tmp_path / "raw.dts"
+        f.write_text('#define X 1\n/dts-v1/;\n/ {};\n')
+        with pytest.raises(UnpreprocessedDTSError):
+            parse_dts_file(str(f))
+
+
+class TestIsDTB:
+    def test_non_dtb_file(self, tmp_path):
+        from socc.preprocess import is_dtb
+        f = tmp_path / "text.dts"
+        f.write_text("/dts-v1/;\n/ {};\n")
+        assert is_dtb(str(f)) is False
+
+    def test_dtb_magic(self, tmp_path):
+        from socc.preprocess import is_dtb
+        f = tmp_path / "board.dtb"
+        f.write_bytes(b'\xd0\x0d\xfe\xed' + b'\x00' * 60)
+        assert is_dtb(str(f)) is True
+
+    def test_missing_file(self, tmp_path):
+        from socc.preprocess import is_dtb
+        assert is_dtb(str(tmp_path / "nonexistent.dtb")) is False
