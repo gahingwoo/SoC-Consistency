@@ -159,6 +159,9 @@ class SEC201SecureMemoryLeakage(BaseRule):
             is_dma_master = _has_kw(compat, _DMA_MASTER_COMPAT) or _has_kw(dev_name.lower(), _DMA_MASTER_COMPAT)
             if not is_dma_master:
                 continue
+            # display-subsystem is a virtual bus aggregator, not a DMA master itself.
+            if "display-subsystem" in compat:
+                continue
 
             # Check if IOMMU is present (provides isolation)
             has_iommu = "iommus" in dev_node.properties or "dma-ranges" in dev_node.properties

@@ -129,6 +129,9 @@ class DMA001MissingIommuBinding(BaseRule):
                 continue
             if _is_iommu_controller(compat):
                 continue  # skip the controller itself
+            # display-subsystem is a virtual bus aggregator, not a DMA master itself.
+            if "display-subsystem" in compat:
+                continue
             has_iommus = dev_node.has_property("iommus")
             if not has_iommus:
                 violations.append(self._create_violation(

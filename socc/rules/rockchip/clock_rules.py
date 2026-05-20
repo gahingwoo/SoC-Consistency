@@ -48,8 +48,19 @@ class CK102ClockProviderNotFound(BaseRule):
 
         for device_name, clock_list in model.device_clocks.items():
             for clock_name in clock_list:
-                provider = model.clock_tree.find_provider(clock_name)
-                if provider is None:
+                # Support "provider:spec" format emitted by the numeric-phandle
+                # resolver for pre-compiled DTS files (e.g. "protocol@14:0").
+                if ":" in clock_name:
+                    provider_name = clock_name.split(":", 1)[0]
+                    found = provider_name in model.clock_tree.providers
+                else:
+                    # No specifier — the clock_name IS the provider name
+                    # (e.g. a PHY node with #clock-cells = 0).
+                    found = (
+                        model.clock_tree.find_provider(clock_name) is not None
+                        or clock_name in model.clock_tree.providers
+                    )
+                if not found:
                     violations.append(
                         self._create_violation(
                             message=f"Device {device_name} requires clock {clock_name!r} but no provider is registered.",
@@ -239,6 +250,11 @@ class CK106ClockSourceContention(BaseRule):
             label = clock_name.lstrip("&")
             if clock_name in fixed_clock_labels or label in fixed_clock_labels:
                 continue  # reference oscillator, sharing is expected
+            # CRU/SCMI/CCF-managed clocks are stored in "provider:spec" format.
+            # Linux CCF correctly handles multiple consumers via reference counting,
+            # so sharing these clocks among many devices is expected and not contention.
+            if ":" in clock_name:
+                continue
             # Pure-integer clock names are either clock-cell indices or
             # pre-resolved phandle numbers.  When shared by 50+ devices the
             # value is almost certainly the phandle of xin24m or a similar
@@ -283,11 +299,13 @@ class CK107AssignedClockRatesMissing(BaseRule):
 
     # Device compatible substrings that are known to require explicit clock rates.
     # Drawn from upstream kernel binding documentation.
+    # NOTE: 'usb3' removed (caught by 'dwc3'/'xhci'; also falsely matches 'fusb302').
+    # NOTE: 'dp' removed (matches 'csidphy', 'usbdpphy', 'hdptx-phy'; eDP covered by 'edp').
     _RATE_CRITICAL_TOKENS = frozenset({
-        "usb3", "usb3phy", "dwc3", "xhci",
+        "usb3phy", "dwc3", "xhci",
         "pcie", "pcie-phy",
         "mipi-dsi", "mipi-csi", "dsi", "csi2",
-        "hdmi", "dp", "edp",
+        "hdmi", "edp",
         "ufs",
         "emmc", "sdhci",
     })
@@ -312,6 +330,15 @@ class CK107AssignedClockRatesMissing(BaseRule):
                 or any(tok in compat_str for tok in self._RATE_CRITICAL_TOKENS)
             )
             if not is_critical:
+                continue
+
+            # Skip infrastructure/glue nodes that don't need assigned-clock-rates:
+            # syscon GRF registers, connector stubs, physical-layer PHY drivers.
+            if compat_str and (
+                "syscon" in compat_str
+                or "-connector" in compat_str
+                or compat_str.split(",")[-1].strip().endswith("-phy")
+            ):
                 continue
 
             # Must have assigned-clocks + assigned-clock-rates together

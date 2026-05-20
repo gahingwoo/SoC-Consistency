@@ -5,6 +5,59 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.1] — 2026-05-20
+
+### Fixed
+
+- **False positives — MM-006 `RegisterAddressNodeNameMismatch`.**
+  Rewrote `_all_addrs_from_reg()` to correctly handle multi-region `reg` arrays
+  and 2-cell `<addr size>` forms. Previously, `usb2phy@0`, `codec-sram@0`,
+  `video-codec@fdc38000`, and both `pcie@fe180000`/`fe190000` were flagged as
+  mismatches; all were false positives caused by only reading the first region
+  and misinterpreting 2-cell arrays as 64-bit hi/lo pairs.
+
+- **False positives — CK-106 `ClockSourceContention`.**
+  CRU/SCMI/CCF-managed clocks stored in `provider:spec` format are now skipped.
+  Linux CCF handles multi-consumer sharing via reference counting; flagging 4
+  USB controllers sharing the same CRU output as "contention" was incorrect.
+
+- **False positives — CK-107 `AssignedClockRatesMissing`.**
+  Removed `"usb3"` token (matched `fusb302` USB-PD chip via substring `"usb3"`
+  in `"fusb302"`) and `"dp"` token (matched `csidphy-grf`, `usbdpphy-grf`,
+  `hdptxphy-grf` syscon nodes and `csi-dphy`/`hdptx-phy` PHY nodes).
+  Added explicit exclusions for `syscon`, `-connector`, and `-phy` compatibles.
+
+- **False positives — CK-104 `ClockProviderOrphaned`.**
+  Added `_link_device_clocks()` pass in `DTSMapper.map()` to populate
+  `ClockProvider.outputs` from `device_clocks`. Providers such as the SCMI
+  `protocol@14` clock controller were incorrectly flagged as orphaned even
+  though many devices consumed their clocks.
+
+- **False positives — PD-006 `OrphanedRegulator`.**
+  Power-domain controller detection now requires `#power-domain-cells` in the
+  node's properties rather than matching by name pattern. Previously all 28
+  `power-domain@N` sub-nodes of the RK3588 power controller were incorrectly
+  registered as standalone regulators and immediately flagged as orphaned.
+  `regulator-state-*` sub-nodes (operating-mode descriptors) are also excluded.
+
+- **False positives — DMA-001 / SEC-201.**
+  `display-subsystem` virtual bus aggregator nodes are now excluded from DMA
+  master checks; they are not DMA devices themselves.
+
+- **Severity — PD-007 `IOBeforeCoreSequence` downgraded to `warning`.**
+  PMIC sub-regulators powered directly from VIN do not declare an explicit DTS
+  parent — this is the normal PMIC pattern. Raising these to `error` produced
+  noise on every PMIC-based board.
+
+- **Polish — SARIF output `your-org` placeholder URLs replaced.**
+  `helpUri` and `informationUri` now point to
+  `https://github.com/gahingwoo/SoC-Consistency`.
+
+- **Polish — SARIF `version` field was hardcoded `"0.2.0"`.**
+  Now reads from `socc.__version__` dynamically.
+
+---
+
 ## [1.4.0] — 2026-05-20
 
 ### New Rules

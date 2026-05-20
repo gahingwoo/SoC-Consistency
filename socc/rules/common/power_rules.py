@@ -44,7 +44,7 @@ class PD007IOBeforeCoreSequence(BaseRule):
         "A missing parent link means the sequencing constraint cannot be "
         "verified and is treated as a violation."
     )
-    severity = "error"
+    severity = "warning"
 
     def check(self, model: SoC, context: CheckContext) -> List[Violation]:
         violations: List[Violation] = []

@@ -24,8 +24,15 @@ class PD001PowerDomainNotFound(BaseRule):
         # iterate devices and their required supplies
         for device_name, supplies in model.device_supplies.items():
             for supply in supplies:
-                # check supply exists
-                if supply not in model.power_tree.nodes:
+                # Support "controller:spec" format from pre-compiled DTS phandle
+                # resolution (e.g. "power-controller:12").  Check that the named
+                # controller node is registered in the power tree.
+                if ":" in supply:
+                    controller_name = supply.split(":", 1)[0]
+                    exists = controller_name in model.power_tree.nodes
+                else:
+                    exists = supply in model.power_tree.nodes
+                if not exists:
                     violations.append(
                         self._create_violation(
                             message=f"Device {device_name} requires power supply {supply!r} which is not defined.",

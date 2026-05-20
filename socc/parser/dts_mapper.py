@@ -31,7 +31,8 @@ class DTSMapper:
     def __init__(self, dts_tree: Dict[str, Any], soc_name: str = "unknown"):
         self.dts_tree = dts_tree
         self.soc_name = soc_name
-        self.phandle_map: Dict[str, Dict[str, Any]] = {}  # phandle -> node
+        self.phandle_map: Dict[str, Dict[str, Any]] = {}  # label -> node
+        self.numeric_phandle_map: Dict[int, Dict[str, Any]] = {}  # phandle int -> node
         self.power_tree = PowerTree()
         self.clock_tree = ClockTree()
         self.devices: Dict[str, IRNode] = {}
@@ -51,6 +52,14 @@ class DTSMapper:
         
         # pass 4: extract device nodes
         self._extract_devices()
+
+        # pass 4.5: link device supplies back to regulator consumer lists so
+        # that is_orphaned() works correctly (PD-006)
+        self._link_device_supplies()
+
+        # pass 4.6: link device clocks back to provider output lists so
+        # that orphaned-provider checks (CK-104) do not fire on used providers
+        self._link_device_clocks()
 
         # pass 5: extract pinmux configuration
         pinmux_config = self._extract_pinmux()
@@ -153,11 +162,20 @@ class DTSMapper:
         if node.get("type") == "node":
             node_name = node.get("name", "")
             label = node.get("label")
-            
-            # use label as phandle key
+
+            # use label as phandle key (symbolic references, e.g. &cru)
             if label:
                 self.phandle_map[f"&{label}"] = node
-        
+
+            # also build numeric phandle map for pre-compiled DTS where
+            # &cru has been replaced with its numeric phandle value
+            props = node.get("properties", {})
+            phandle_val = props.get("phandle")
+            if isinstance(phandle_val, list):
+                phandle_val = phandle_val[0] if phandle_val else None
+            if isinstance(phandle_val, int):
+                self.numeric_phandle_map[phandle_val] = node
+
         # recurse into children
         for child in node.get("children", []):
             self._collect_phandles(child, path)
@@ -182,12 +200,17 @@ class DTSMapper:
                 "pmic" in node_name.lower() or
                 any(k.startswith("regulator-") for k in props.keys())
             )
+            # regulator-state-* sub-nodes describe operating modes, not devices
+            if node_name.lower().startswith("regulator-state"):
+                is_regulator = False
             
             if is_regulator and node_type == "node":  # skip root
                 self._extract_regulator(node)
             
-            # Detect power-domain nodes
-            if "power" in node_name.lower() and "domain" in node_name.lower():
+            # Detect power-domain controller by #power-domain-cells property only.
+            # Sub-nodes named power-domain@N are domains OF the controller, not
+            # controllers themselves — they lack #power-domain-cells.
+            if "#power-domain-cells" in props:
                 self._extract_power_domain(node)
             
             # recurse
@@ -272,17 +295,19 @@ class DTSMapper:
         def traverse(node: Dict[str, Any]) -> None:
             if node.get("type") not in ("node", "root"):
                 return
-            
+
             node_name = node.get("name", "")
-            
-            # detect clock providers by node name
-            if any(x in node_name.lower() for x in ["clock", "pll", "osc", "xtal"]):
+            props = node.get("properties", {})
+
+            # detect clock providers by node name OR by #clock-cells property
+            if (any(x in node_name.lower() for x in ["clock", "pll", "osc", "xtal"])
+                    or "#clock-cells" in props):
                 self._extract_clock_provider(node)
-            
+
             # recurse
             for child in node.get("children", []):
                 traverse(child)
-        
+
         traverse(self.dts_tree)
     
     def _extract_clock_provider(self, node: Dict[str, Any]) -> None:
@@ -342,14 +367,133 @@ class DTSMapper:
         except ValueError:
             pass
     
+    def _parse_phandle_cell_refs(
+        self,
+        cells_raw: Any,
+        cells_prop: Optional[str],
+        default_cells: int = 1,
+    ) -> List[str]:
+        """Resolve a flat phandle+specifier cell array into provider-name strings.
+
+        In a pre-compiled DTS (dtc output) symbolic references such as ``&cru``
+        are replaced by their numeric phandle (e.g. ``0x0a``), so a property
+        like ``clocks = <&cru ARMCLK_CLUSTER0>`` becomes ``<0x0a 0x00>``.  The
+        parser therefore yields a flat integer list ``[10, 0]``.  This method:
+
+        1. Looks up the first integer as a numeric phandle.
+        2. Reads ``cells_prop`` (e.g. ``#clock-cells``) from the resolved node
+           to determine how many specifier cells follow.
+        3. Returns ``"provider_name:spec"`` strings that CK-102 / PD-001 can
+           validate against registered providers.
+
+        Unresolvable phandles are silently skipped so they do not generate
+        false-positive violations.
+        """
+        if not isinstance(cells_raw, list):
+            cells_raw = [cells_raw]
+
+        refs: List[str] = []
+        i = 0
+        while i < len(cells_raw):
+            cell = cells_raw[i]
+            if isinstance(cell, int):
+                provider_node = self.numeric_phandle_map.get(cell)
+                if provider_node is not None:
+                    # determine number of specifier cells from the provider
+                    if cells_prop is not None:
+                        n_cells_val = provider_node.get("properties", {}).get(
+                            cells_prop, default_cells
+                        )
+                        if isinstance(n_cells_val, list):
+                            n_cells_val = n_cells_val[0] if n_cells_val else default_cells
+                        try:
+                            n_cells = int(n_cells_val)
+                        except (TypeError, ValueError):
+                            n_cells = default_cells
+                    else:
+                        n_cells = default_cells  # 0 for *-supply refs
+
+                    specifiers = cells_raw[i + 1: i + 1 + n_cells]
+                    provider_name = (
+                        provider_node.get("label")
+                        or provider_node.get("name")
+                        or f"phandle{cell}"
+                    )
+                    spec_str = "_".join(str(s) for s in specifiers)
+                    refs.append(
+                        f"{provider_name}:{spec_str}" if spec_str else provider_name
+                    )
+                    i += 1 + n_cells
+                else:
+                    # Unresolvable numeric phandle — skip it and its assumed cells
+                    i += 1 + default_cells
+            elif isinstance(cell, str) and cell.startswith("&"):
+                # Symbolic phandle reference (non-compiled DTS)
+                provider_node = self.phandle_map.get(cell)
+                if provider_node is not None:
+                    provider_name = (
+                        provider_node.get("label")
+                        or provider_node.get("name")
+                        or cell[1:]
+                    )
+                    refs.append(provider_name)
+                i += 1
+            else:
+                i += 1
+        return refs
+
+    def _link_device_clocks(self) -> None:
+        """Populate ``ClockProvider.outputs`` from ``device_clocks`` links.
+
+        Without this pass every provider whose outputs list is empty is treated
+        as orphaned by CK-104, even when devices in ``device_clocks`` actively
+        reference it (e.g. the SCMI protocol@14 clock controller).
+        """
+        for _device_name, clock_list in self.device_clocks.items():
+            for clock_ref in clock_list:
+                provider_name = clock_ref.split(":", 1)[0] if ":" in clock_ref else clock_ref
+                provider = self.clock_tree.providers.get(provider_name)
+                if provider is not None and clock_ref not in provider.outputs:
+                    provider.outputs.append(clock_ref)
+
+    def _link_device_supplies(self) -> None:
+        """Populate ``Regulator.consumers`` based on ``device_supplies`` links.
+
+        Without this pass ``power_tree.is_orphaned()`` always returns True for
+        every regulator because ``consumers`` is never set, causing PD-006 to
+        fire on every regulator defined in the tree.
+        """
+        for device_name, supplies in self.device_supplies.items():
+            for supply in supplies:
+                reg_name = supply.split(":", 1)[0] if ":" in supply else supply
+                reg = self.power_tree.nodes.get(reg_name)
+                if reg is not None and device_name not in reg.consumers:
+                    reg.consumers.append(device_name)
+
     def _extract_devices(self) -> None:
         """Extract ordinary device nodes from the DTS tree."""
-        def traverse(node: Dict[str, Any], depth: int = 0) -> None:
+
+        # Sub-tree roots whose children are configuration groups rather than
+        # independent peripheral devices.  Nodes under these containers should
+        # not be treated as individual devices by the rule engine.
+        _SKIP_SUBTREES = frozenset({
+            "pinctrl", "thermal-zones", "reserved-memory", "cpu-map",
+            "opp-table-cluster0", "opp-table-cluster1", "opp-table-cluster2",
+            "opp-table-gpu", "opp-table-npu",
+        })
+
+        def traverse(node: Dict[str, Any], depth: int = 0, skip: bool = False) -> None:
             if node.get("type") not in ("node", "root"):
                 return
 
             node_name = node.get("name", "")
             props = node.get("properties", {})
+
+            if skip:
+                # Inside a structural container: recurse but don't add as device.
+                for child in node.get("children", []):
+                    traverse(child, depth + 1, skip=True)
+                return
 
             # skip root, "/" node, and clock/regulator/power nodes
             if node.get("type") == "node" and node_name != "/" and not any(
@@ -364,22 +508,38 @@ class DTSMapper:
                 )
                 self.devices[node_name] = ir_node
 
-                # extract power-domain supply
+                # extract power-domain supply (phandle+specifier pair)
                 if "power-domains" in props:
-                    self.device_supplies[node_name] = [str(props["power-domains"])]
+                    pd_refs = self._parse_phandle_cell_refs(
+                        props["power-domains"], "#power-domain-cells", 1
+                    )
+                    if pd_refs:
+                        self.device_supplies[node_name] = pd_refs
 
-                # extract clock references
+                # extract *-supply regulator references (single phandle, no specifier)
+                for prop_name, prop_val in props.items():
+                    if prop_name.endswith("-supply"):
+                        supply_refs = self._parse_phandle_cell_refs(
+                            prop_val, None, 0
+                        )
+                        if supply_refs:
+                            existing = self.device_supplies.get(node_name, [])
+                            existing.extend(supply_refs)
+                            self.device_supplies[node_name] = existing
+
+                # extract clock references (phandle+specifier pairs)
                 if "clocks" in props:
-                    clocks = props["clocks"]
-                    if isinstance(clocks, list):
-                        self.device_clocks[node_name] = [str(c) for c in clocks]
-                    else:
-                        self.device_clocks[node_name] = [str(clocks)]
-            
-            # recurse
+                    clock_refs = self._parse_phandle_cell_refs(
+                        props["clocks"], "#clock-cells", 1
+                    )
+                    if clock_refs:
+                        self.device_clocks[node_name] = clock_refs
+
+            # Determine whether children are inside a structural container
+            skip_children = node_name.split("@")[0] in _SKIP_SUBTREES
             for child in node.get("children", []):
-                traverse(child, depth + 1)
-        
+                traverse(child, depth + 1, skip=skip_children)
+
         traverse(self.dts_tree)
 
 

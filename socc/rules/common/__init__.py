@@ -25,6 +25,23 @@ class GEN401OrphanedNode(BaseRule):
     description = "Detect nodes that are defined but never referenced."
     severity = "info"
 
+    # Well-known structural / topology node names that are not peripheral
+    # devices and should never be flagged as orphaned.
+    _STRUCTURAL_EXACT: frozenset = frozenset({
+        "aliases", "chosen", "cpus", "cpu-map", "memory", "reserved-memory",
+        "firmware", "psci", "timer", "idle-states", "cpu-sleep",
+        "thermal-zones", "clocks", "regulators", "pmu", "ports",
+        "port", "endpoint", "trips", "cooling-maps",
+        # SCMI / display / audio containers
+        "scmi", "display-subsystem",
+        # Misc infrastructure nodes that don't need supply/clock connections
+        "iommu", "qos", "dfi", "msi-controller", "ppi-partitions",
+    })
+    _STRUCTURAL_PREFIX: tuple = (
+        "l2-cache", "l3-cache", "cluster", "core", "opp-table", "opp-",
+        "pmu-", "map",
+    )
+
     def check(self, model: SoC, context: CheckContext) -> List[Violation]:
         """
         Check for orphaned device nodes.
@@ -33,12 +50,34 @@ class GEN401OrphanedNode(BaseRule):
 
         # simple check: devices with no supplies, clocks, or power-tree entry
         for device_name in list(model.devices.keys()):
+            device = model.devices[device_name]
+
+            # Nodes that have a numeric ``phandle`` property are referenced by
+            # other nodes (e.g. clock controllers, reset controllers, syscon).
+            # Flagging them as orphaned would be a false positive.
+            if device.properties.get("phandle") is not None:
+                continue
+
+            # Only flag nodes that look like real peripheral device drivers.
+            # Nodes without a ``compatible`` property are structural containers,
+            # sub-nodes (pin groups, OPP entries, etc.) or pure config groups —
+            # they are never standalone devices and don't need supply/clock refs.
+            if device.properties.get("compatible") is None:
+                continue
+
+            # Skip well-known structural / CPU-topology nodes.
+            base = device_name.split("@")[0]
+            if base in self._STRUCTURAL_EXACT or any(
+                base.startswith(p) for p in self._STRUCTURAL_PREFIX
+            ):
+                continue
+
             has_supplies = device_name in model.device_supplies
             has_clocks = device_name in model.device_clocks
             # check power-tree membership and clock consumers
             in_power_tree = device_name in model.power_tree.nodes
             in_clock_consumers = any(
-                device_name in clock.consumers 
+                device_name in clock.consumers
                 for clock in model.clock_tree.clocks.values()
             )
 

@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import click
 
 from socc.model import SoC, Violation
+from socc import __version__
 
 from socc.rules import RuleRegistry, CheckContext
 
@@ -232,7 +233,7 @@ class Checker:
                     "id": v.code,
                     "name": v.rule_name or v.code,
                     "shortDescription": {"text": v.message},
-                    "helpUri": f"https://github.com/your-org/soc-consistency/blob/main/docs/rules.md#{v.code.lower().replace('-', '')}",
+                    "helpUri": f"https://github.com/gahingwoo/SoC-Consistency/blob/main/docs/rules.md#{v.code.lower().replace('-', '')}",
                 }
 
         results = []
@@ -264,8 +265,8 @@ class Checker:
                     "tool": {
                         "driver": {
                             "name": "socc",
-                            "version": "0.2.0",
-                            "informationUri": "https://github.com/your-org/soc-consistency",
+                            "version": __version__,
+                            "informationUri": "https://github.com/gahingwoo/SoC-Consistency",
                             "rules": list(rules_seen.values()),
                         }
                     },

@@ -1,5 +1,7 @@
 """socc — SoC device-tree consistency checker."""
 
+__version__ = "1.4.1"
+
 from .model import (
     IRNode,
     Violation,
@@ -12,8 +14,6 @@ from .model import (
 )
 from .rules import BaseRule, CheckContext, RuleRegistry
 from .engine import Checker
-
-__version__ = "1.3.0"
 
 __all__ = [
     # Model

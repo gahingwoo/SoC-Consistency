@@ -38,27 +38,46 @@ def _addr_from_name(node_name: str) -> int | None:
         return None
 
 
-def _addr_from_reg(reg_val) -> int | None:
-    """Extract the first physical base address from a reg property value.
+def _all_addrs_from_reg(reg_val) -> list:
+    """Return every physical base address present in a ``reg`` property.
 
-    reg can be:
-      <addr size>              → [addr, size]
-      <0x0 addr 0x0 size>     → [0, addr, 0, size]  (64-bit cells)
+    Handles three common forms used on SoCs:
+
+    * Single integer ``<addr>``
+    * 2-cell groups ``<addr size>`` — 1-cell address + 1-cell size (e.g. GRF
+      sub-nodes, I2C devices).  First cell of each pair is the address.
+    * 4-cell groups ``<hi lo size_hi size_lo> ...`` — 2-cell address + 2-cell
+      size.  Only regions where *hi* == 0 are collected (address fits in 32
+      bits and can match a 32-bit node-name suffix).
+
+    The cell-width is inferred from the total cell count:
+    * ``n % 4 == 0`` → 4-cell groups (64-bit bus, typical root-level SoC nodes)
+    * Otherwise        → 2-cell pairs  (32-bit bus or I2C offset)
     """
     if reg_val is None:
-        return None
+        return []
     if isinstance(reg_val, int):
-        return reg_val
-    if not isinstance(reg_val, (list, tuple)) or len(reg_val) == 0:
-        return None
-    # If 4-cell form [hi, lo, size_hi, size_lo] where hi==0: address is reg[1]
-    if len(reg_val) >= 2 and isinstance(reg_val[0], int) and reg_val[0] == 0:
-        if isinstance(reg_val[1], int):
-            return reg_val[1]
-    # Default: first element is the address
-    if isinstance(reg_val[0], int):
-        return reg_val[0]
-    return None
+        return [reg_val]
+    cells = [c for c in reg_val if isinstance(c, int)]
+    if not cells:
+        return []
+    n = len(cells)
+    if n == 1:
+        return [cells[0]]
+    # 4-cell groups: hi, lo, size_hi, size_lo
+    if n % 4 == 0:
+        addrs = []
+        for i in range(0, n, 4):
+            hi, lo = cells[i], cells[i + 1]
+            if hi == 0:
+                addrs.append(lo)
+        return addrs  # empty list is fine — all regions in high memory
+    # 2-cell pairs: addr, size
+    addrs = []
+    for i in range(0, n - 1, 2):
+        addrs.append(cells[i])
+    return addrs or [cells[0]]
+
 
 
 class RegNameMismatchRule(BaseRule):
@@ -85,11 +104,13 @@ class RegNameMismatchRule(BaseRule):
             if reg_val is None:
                 continue  # no reg property — skip
 
-            reg_addr = _addr_from_reg(reg_val)
-            if reg_addr is None:
+            reg_addrs = _all_addrs_from_reg(reg_val)
+            if not reg_addrs:
                 continue
 
-            if name_addr != reg_addr:
+            if name_addr not in reg_addrs:
+                # Report the first address from the reg for context
+                reg_addr = reg_addrs[0]
                 violations.append(self._create_violation(
                     message=(
                         f"Node is named {dev_name!r} (address 0x{name_addr:08x}) "

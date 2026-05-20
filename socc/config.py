@@ -57,7 +57,7 @@ def filter_by_severity(violations: list, min_severity: str) -> list:
 
 SAMPLE_CONFIG = """\
 # socc configuration file
-# https://github.com/your-org/soc-consistency
+# https://github.com/gahingwoo/SoC-Consistency
 
 # Target SoC (rk3588 | rk3566 | rk3399 | auto)
 default_soc: auto
