@@ -4,6 +4,8 @@
 [![Python](https://img.shields.io/pypi/pyversions/soc-consistency)](https://pypi.org/project/soc-consistency/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+![socc demo](docs/demo.gif)
+
 **socc** is a static-analysis and behavioural-simulation tool that catches
 hardware-level bugs in Linux Device Tree Source (DTS) files — the kind that
 pass `dtc` and `dt-schema` validation but still destroy your board at runtime.
