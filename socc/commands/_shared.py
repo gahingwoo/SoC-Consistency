@@ -217,8 +217,8 @@ def severity_tag(severity: str, color: Optional[bool]) -> str:
 
 
 def echo(msg: str, color: Optional[bool] = None) -> None:
-    """Print a status message."""
-    click.echo(msg)
+    """Print a status message to stderr (keeps stdout clean for machine-readable formats)."""
+    click.echo(msg, err=True)
 
 
 # ── Cached DTS parsing ───────────────────────────────────────────────────────

@@ -5,6 +5,41 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.3] — 2026-05-20
+
+### Fixed
+
+- **JSON/SARIF output corruption.** Status messages (`Loading device tree`,
+  `[cache] …`) were written to stdout, prepending non-JSON text before the
+  report and making `--format json` / `--format sarif` unparseable by downstream
+  tools (e.g. `jq`, CI SARIF parsers).  Status messages now always go to stderr.
+  *(socc/commands/_shared.py)*
+
+- **IRQ-C02 false positive — ARM PMU (PPI 7).** `pmu-a55` / `pmu-a76` nodes
+  were incorrectly flagged as using a reserved PPI.  PPI 7 is the architecturally
+  assigned PMU interrupt and is perfectly valid for performance-counter drivers.
+  *(socc/irqcheck.py — `_RESERVED_PPI`)*
+
+- **IRQ-C02 false positive — ARM architectural timer (PPIs 13/14/15).**
+  `arm,armv8-timer` nodes were flagged; PPIs 13–15 are the correct ARM
+  architectural timer lines by specification.  These nodes are now exempted from
+  the reserved-PPI check.
+  *(socc/irqcheck.py — IRQ-C02 stage)*
+
+- **IRQ-C02 false positive — 4-cell GIC interrupt format (GIC-v3 / SMMU).**
+  `arm,smmu-v3` and other GIC-v3 peripherals encode interrupts as 4-cell tuples
+  `<type  number  flags  affinity>`.  The parser consumed them as 3-cell triplets,
+  misaligning subsequent entries and generating phantom IRQ collisions.  The
+  parser now auto-detects stride-4 when the array length is a multiple of 4 but
+  not 3.
+  *(socc/irqcheck.py — `_parse_interrupts`)*
+
+- **`__version__` mismatch.** `socc/__init__.py` reported `1.4.1` while
+  `pyproject.toml` declared `1.4.2`; `socc --version` showed the wrong string.
+  Both files now agree on `1.4.3`.
+
+---
+
 ## [1.4.2] — 2026-05-20
 
 ### Fixed

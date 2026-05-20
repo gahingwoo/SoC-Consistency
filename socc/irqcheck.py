@@ -55,9 +55,21 @@ GIC_SPI = 0   # Shared Peripheral Interrupt
 GIC_PPI = 1   # Private Peripheral Interrupt
 
 # PPI lines 0-15 that are architecturally reserved (FIQ, SGI, timer).
-# Binding a device driver ISR here will loop the core.
-_RESERVED_PPI: Set[int] = {0, 1, 2, 3, 4, 5, 6, 7,  # SGI 0-7
-                            13, 14, 15}               # Non-Secure/Sec/VTimer
+# Binding an arbitrary device driver ISR here will loop the core.
+#
+# PPI 7 is the ARM PMU interrupt — legitimately used by perf/PMU drivers.
+# PPIs 8-12 are various ARM CPU-internal PPIs (vGIC, EL2 maintenance, etc.).
+# PPIs 13-15 are the ARM architectural timer lines — only arm,armv8-timer
+# (and variants) should use them; that node is exempt from this check below.
+_RESERVED_PPI: Set[int] = {0, 1, 2, 3, 4, 5, 6,  # unassigned SGI-range
+                            13, 14, 15}            # ARM timer PPIs
+
+# Compatible strings whose use of PPIs 13-15 is architecturally correct.
+_ARCH_TIMER_COMPATS: frozenset = frozenset({
+    "arm,armv8-timer",
+    "arm,armv7-timer",
+    "arm,armv7s-timer",
+})
 
 
 @dataclass
@@ -110,9 +122,13 @@ def _parse_interrupts(prop_val: Any) -> List[IRQClaim]:
     claims: List[IRQClaim] = []
     items = prop_val
 
-    # Try 3-cell GIC encoding
+    # Try 3-cell or 4-cell GIC encoding.
+    # GIC-v2 uses 3 cells: <type  number  flags>
+    # GIC-v3 may use 4 cells: <type  number  flags  phandle-or-affinity>
+    # Heuristic: if the array length divides evenly by 4 but NOT by 3,
+    # use stride 4 (read the first three cells, skip the fourth).
     if len(items) >= 3 and all(isinstance(x, int) for x in items[:3]):
-        # May have multiple triplets
+        stride = 4 if (len(items) % 3 != 0 and len(items) % 4 == 0) else 3
         i = 0
         while i + 2 < len(items):
             try:
@@ -130,7 +146,7 @@ def _parse_interrupts(prop_val: Any) -> List[IRQClaim]:
                 flags=flags,
                 global_irq=global_irq,
             ))
-            i += 3
+            i += stride
     elif len(items) >= 1 and isinstance(items[0], int):
         # 1-cell encoding — treat as raw SPI number
         try:
@@ -219,7 +235,17 @@ def check_irq(soc: SoC) -> IRQReport:
         if irq_num not in _RESERVED_PPI:
             continue
         for c in claims:
-            type_str = "PPI"
+            # ARM architectural timer nodes are the only legitimate users of
+            # PPIs 13-15 (CNTP / CNTV / EL2 timer lines).  Flagging them is
+            # a false positive — skip exempted compatibles.
+            node = devices.get(c.node_name)
+            if node is not None and irq_num in {13, 14, 15}:
+                compat = node.properties.get("compatible", "")
+                if isinstance(compat, list):
+                    compat = " ".join(str(x) for x in compat)
+                if any(tc in str(compat) for tc in _ARCH_TIMER_COMPATS):
+                    continue
+
             key = f"GIC PPI IRQ {irq_num}"
             report.issues.append(IRQIssue(
                 severity="ERROR",
@@ -229,8 +255,9 @@ def check_irq(soc: SoC) -> IRQReport:
                     f"which is architecturally reserved (SGI/timer)."
                 ),
                 suggestion=(
-                    "PPI lines 0-7 are SGI-reserved and 13-15 are "
-                    "timer/FIQ lines. Do not bind device drivers here."
+                    "PPI lines 0-7 are unassigned SGI-range; PPIs 13-15 are "
+                    "ARM timer lines (only arm,armv8-timer may use them). "
+                    "Do not bind arbitrary device drivers to these lines."
                 ),
                 nodes=[(c.node_name, c.node_path)],
                 irq_key=key,

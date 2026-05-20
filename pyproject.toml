@@ -10,7 +10,7 @@ include = ["socc*"]
 
 [project]
 name = "soc-consistency"
-version = "1.4.2"
+version = "1.4.3"
 description = "Static analysis tool that catches hardware-level bugs in Linux Device Tree Source (DTS) files"
 readme = "README.md"
 license = {text = "MIT"}
