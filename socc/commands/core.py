@@ -40,6 +40,86 @@ def _compute_exit_code(violations: list, strict: bool = False) -> int:
     return 3 if has_error else 0
 
 
+def _run_dt_validate(dts_file: str, use_color=None) -> None:
+    """Run ``dt-validate`` (dt-schema) if installed and print its output.
+
+    This is an *additive* check — socc's own violations are always shown
+    first; dt-validate findings are appended as a second opinion.  If
+    dt-validate is not on PATH the function silently skips.
+    """
+    import shutil
+    import subprocess
+
+    dtc = shutil.which("dtc")
+    dtv = shutil.which("dt-validate")
+    if not dtv:
+        click.echo(
+            click.style(
+                "\n[socc --binding] dt-validate not found on PATH; "
+                "install dtschema: pip install dtschema",
+                fg="yellow",
+            ),
+            err=True,
+        )
+        return
+
+    click.echo(
+        click.style("\n[socc --binding] Running dt-validate …", fg="cyan"),
+    )
+
+    # Compile DTS to DTB first if dtc is available
+    import tempfile, os
+    dtb_path = None
+    try:
+        if dtc:
+            with tempfile.NamedTemporaryFile(suffix=".dtb", delete=False) as tmp:
+                dtb_path = tmp.name
+            result = subprocess.run(
+                ["dtc", "-I", "dts", "-O", "dtb", "-o", dtb_path, dts_file],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                click.echo(
+                    click.style(
+                        f"[socc --binding] dtc compilation failed:\n{result.stderr}",
+                        fg="red",
+                    ),
+                    err=True,
+                )
+                return
+            validate_target = dtb_path
+        else:
+            validate_target = dts_file
+
+        result = subprocess.run(
+            ["dt-validate", validate_target],
+            capture_output=True, text=True, timeout=60,
+        )
+        output = (result.stdout + result.stderr).strip()
+        if not output:
+            click.echo(
+                click.style("[socc --binding] dt-validate: no findings.", fg="green")
+            )
+        else:
+            click.echo(
+                click.style("[socc --binding] dt-validate findings:", fg="yellow")
+            )
+            click.echo(output)
+    except subprocess.TimeoutExpired:
+        click.echo(
+            click.style("[socc --binding] dt-validate timed out.", fg="red"),
+            err=True,
+        )
+    except Exception as exc:
+        click.echo(
+            click.style(f"[socc --binding] dt-validate error: {exc}", fg="red"),
+            err=True,
+        )
+    finally:
+        if dtb_path and os.path.exists(dtb_path):
+            os.unlink(dtb_path)
+
+
 # ── check ──────────────────────────────────────────────────────────────────
 
 @click.command()
@@ -76,9 +156,11 @@ def _compute_exit_code(violations: list, strict: bool = False) -> int:
               help="Only check DTS files changed since this git ref (e.g. HEAD~1, main).")
 @click.option("--strict", is_flag=True, default=False,
               help="Exit non-zero for warnings (default: only errors produce a non-zero exit).")
+@click.option("--binding", "dt_binding", is_flag=True, default=False,
+              help="Also run dt-validate (dt-schema) if available; merge findings.")
 def check(dts_file, soc, output_format, min_severity, ignore_rule,
           skip_rules, color, demo, netlist_csv, watch, no_cache,
-          rules_dirs, git_since, strict):
+          rules_dirs, git_since, strict, dt_binding):
     """Check a device tree for SoC consistency violations."""
     import os, time, hashlib
 
@@ -198,6 +280,10 @@ def check(dts_file, soc, output_format, min_severity, ignore_rule,
 
         report = checker.generate_report(violations, resolved_format, color=use_color)
         click.echo(report)
+
+        # ── optional dt-schema/dt-validate pass ───────────────────────────
+        if dt_binding and not demo and dts_file:
+            _run_dt_validate(dts_file, use_color=use_color)
 
         return _compute_exit_code(violations, strict=strict)
 

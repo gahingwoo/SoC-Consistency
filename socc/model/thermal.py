@@ -25,6 +25,7 @@ class ThermalZone:
     polling_delay_passive: int = 250    # ms (polling-delay-passive DTS property)
     trips: List[ThermalTrip] = field(default_factory=list)
     cooling_devices: List[str] = field(default_factory=list)
+    has_sensor: bool = True             # False when thermal-sensors binding is absent
 
     @property
     def critical_trip(self) -> ThermalTrip | None:

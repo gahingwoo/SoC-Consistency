@@ -251,3 +251,99 @@ def generate_report(dts_file: str, output_format: str,
     Path(out).write_text(html_text)
     click.echo(f"[INFO] HTML report written to {out}")
     click.echo(f"       Open in browser: file://{Path(out).resolve()}")
+
+
+# ── generate ci ───────────────────────────────────────────────────────────────
+
+@generate_group.command("ci")
+@click.option("--platform", "platform",
+              type=click.Choice(["github", "gitlab", "both"]),
+              default="github", show_default=True,
+              help="Target CI platform.")
+@click.option("--soc", default="auto", show_default=True, metavar="SOC",
+              help="Default SoC for the workflow (auto = filename-based detection).")
+@click.option("--strict", "ci_strict", is_flag=True, default=False,
+              help="Fail the CI job on warnings as well as errors (--strict mode).")
+@click.option("--dts-glob", default="**/*.dts", show_default=True, metavar="GLOB",
+              help="Glob pattern for DTS files to check in the repo.")
+@click.option("-o", "--output-dir", "output_dir", default=".", show_default=True,
+              metavar="DIR",
+              help="Directory where CI config file(s) will be written.")
+def generate_ci(platform: str, soc: str, ci_strict: bool,
+                dts_glob: str, output_dir: str):
+    """Generate a CI/CD workflow that runs socc on every pull request.
+
+    \b
+    Creates ready-to-use config files:
+        GitHub Actions  →  .github/workflows/socc-check.yml
+        GitLab CI       →  .gitlab-ci.yml  (socc-check job)
+
+    \b
+    Examples:
+        socc generate ci
+        socc generate ci --platform gitlab --strict
+        socc generate ci --soc rk3588 --dts-glob "arch/arm64/boot/dts/**/*.dts"
+    """
+    from socc.codegen.ci import render_github_actions_workflow, render_gitlab_ci_job
+
+    out_dir = Path(output_dir)
+    strict_flag = "--strict" if ci_strict else ""
+    soc_flag = f"--soc {soc}" if soc != "auto" else ""
+
+    if platform in ("github", "both"):
+        gh_dir = out_dir / ".github" / "workflows"
+        gh_dir.mkdir(parents=True, exist_ok=True)
+        gh_path = gh_dir / "socc-check.yml"
+        content = render_github_actions_workflow(
+            dts_glob=dts_glob, soc_flag=soc_flag, strict_flag=strict_flag,
+        )
+        gh_path.write_text(content, encoding="utf-8")
+        click.echo(f"GitHub Actions workflow written to: {gh_path}")
+        click.echo("  Add to your repo:  git add .github/workflows/socc-check.yml")
+
+    if platform in ("gitlab", "both"):
+        gl_path = out_dir / ".gitlab-ci.yml"
+        content = render_gitlab_ci_job(
+            dts_glob=dts_glob, soc_flag=soc_flag, strict_flag=strict_flag,
+        )
+        gl_path.write_text(content, encoding="utf-8")
+        click.echo(f"GitLab CI config written to: {gl_path}")
+
+
+# ── generate docs ─────────────────────────────────────────────────────────────
+
+@generate_group.command("docs")
+@click.argument("dts_file", type=click.Path(exists=True))
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
+@click.option("--format", "fmt", type=click.Choice(["markdown", "html"]),
+              default="markdown", show_default=True,
+              help="Output format.")
+@click.option("-o", "--output", default=None, metavar="FILE",
+              help="Output file (default: <stem>-docs.md or <stem>-docs.html).")
+def generate_docs(dts_file: str, soc: Optional[str], fmt: str, output: Optional[str]):
+    """Generate human-readable hardware documentation from a DTS file.
+
+    Produces a structured document listing all enabled peripherals, their
+    base addresses, clock rates, voltage rails, GPIO assignments, and
+    interrupt numbers — ready to share with hardware teams.
+
+    \b
+    Examples:
+        socc generate docs board.dts
+        socc generate docs board.dts --format html -o board-spec.html
+    """
+    from socc.codegen.docs import render_dts_docs
+
+    soc_name = soc or auto_detect_soc(Path(dts_file).name)
+    try:
+        model = parse_dts_file(dts_file, soc_name)
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1)
+
+    text = render_dts_docs(model, dts_path=dts_file, soc_name=soc_name, fmt=fmt)
+    stem = Path(dts_file).stem
+    default_out = f"{stem}-docs.md" if fmt == "markdown" else f"{stem}-docs.html"
+    out_path = output or default_out
+    Path(out_path).write_text(text, encoding="utf-8")
+    click.echo(f"Hardware documentation written to: {out_path}")

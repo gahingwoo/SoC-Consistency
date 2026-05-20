@@ -337,3 +337,63 @@ def audit_netlist(dts_file: str, netlist_file: str, netlist_format: Optional[str
         click.echo(text)
     if sum(1 for r in results if r.severity == "FATAL") > 0:
         raise SystemExit(1)
+
+
+# ── audit sku ─────────────────────────────────────────────────────────────────
+
+@audit_group.command("sku")
+@click.argument("dts_files", nargs=-1, required=True,
+                type=click.Path(exists=True))
+@click.option("--soc", type=FuzzySoCType(ALL_SOC_CHOICES), metavar="SOC", default=None)
+@click.option("--format", "output_format",
+              type=click.Choice(["table", "json"]),
+              default="table", show_default=True)
+@click.option("--color/--no-color", default=True)
+@click.option("-o", "--output", default=None, metavar="FILE")
+def audit_sku(dts_files: tuple, soc: Optional[str], output_format: str,
+              color: bool, output: Optional[str]):
+    """Compare multiple DTS SKU variants side-by-side.
+
+    Loads two or more DTS files (board variants that share the same SoC)
+    and produces a three-column diff showing which nodes/properties differ
+    across SKUs — useful for verifying product variant consistency before
+    release.
+
+    \b
+    Examples:
+        socc audit sku rock5b.dts rock5b-plus.dts
+        socc audit sku sku-a.dts sku-b.dts sku-c.dts --format json
+    """
+    import json as _json
+
+    if len(dts_files) < 2:
+        click.echo("Error: provide at least two DTS files to compare.", err=True)
+        raise SystemExit(1)
+
+    soc_name = soc or auto_detect_soc(Path(dts_files[0]).name)
+
+    models = {}
+    for f in dts_files:
+        try:
+            models[Path(f).name] = parse_dts_file(f, soc_name)
+        except Exception as exc:
+            click.echo(f"Error loading {f}: {exc}", err=True)
+            raise SystemExit(1)
+
+    from socc.sku_audit import compare_sku_models, render_sku_table, render_sku_json
+
+    diff = compare_sku_models(models)
+
+    if output_format == "json":
+        text = render_sku_json(diff)
+    else:
+        text = render_sku_table(diff, use_color=color and output is None)
+
+    if output:
+        Path(output).write_text(text, encoding="utf-8")
+        click.echo(f"SKU comparison report written to: {output}")
+    else:
+        click.echo(text)
+
+    if diff.conflict_count > 0:
+        raise SystemExit(1)

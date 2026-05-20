@@ -5,6 +5,44 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.0] — 2026-05-20
+
+### New Rules
+
+- **DMA-001 `MissingIommuBinding`** — Detects DMA-capable devices (GPU, USB3, PCIe, VPU, GMAC …)
+  that lack an `iommus` property when an IOMMU controller is present. Silent DMA without
+  memory isolation is a common security hole on RK3588/i.MX8MP boards.
+- **DMA-002 `IommuPhandelUndefined`** — Catches dangling `iommus = <&label>` references
+  that do not resolve to any known IOMMU/SMMU controller node.
+- **PD-007 `PowerDomainNamesMismatch`** — Flags devices where the number of entries in
+  `power-domains` and `power-domain-names` disagrees. `of_pm_find_power_domain_dev()`
+  silently returns NULL for unmatched entries, causing probe failure (ENODEV).
+- **THM-004 `MissingThermalSensor`** — Thermal zone without a `thermal-sensors` binding;
+  the kernel thermal driver cannot read temperature and the zone is inactive.
+- **THM-005 `MissingCoolingDevice`** — Passive thermal zone with no `cooling-maps` entry;
+  frequency scaling is never triggered and the zone reaches critical temp with no
+  intermediate cooling step.
+- **CK-107 `AssignedClockRatesMissing`** — USB3, PCIe, MIPI-DSI, HDMI, and other
+  rate-critical devices that have `assigned-clocks` but are missing `assigned-clock-rates`
+  will boot at the wrong frequency, causing silent malfunction.
+
+### New Commands
+
+- **`socc generate ci`** — Writes ready-to-use GitHub Actions (`.github/workflows/socc-check.yml`)
+  or GitLab CI (`.gitlab-ci.yml`) configuration that gates every DTS PR through `socc check`.
+  Options: `--platform github|gitlab|both`, `--strict`, `--soc`, `--dts-glob`.
+- **`socc generate docs`** — Generates a structured Markdown or HTML peripheral inventory
+  from a DTS file — base addresses, clocks, voltage rails, IRQs, GPIO assignments — for
+  sharing with hardware teams. Options: `--format markdown|html`.
+- **`socc audit sku`** — Multi-SKU DTS comparison: loads two or more board-variant DTS files,
+  reports conflicting property values and nodes present in some SKUs but absent in others.
+  Exits non-zero if any divergences are found. Options: `--format table|json`.
+- **`socc check --binding`** — Invokes `dt-validate` (dtschema) if installed and appends its
+  findings after socc's own violations, giving a combined socc + upstream binding audit in a
+  single command.
+
+---
+
 ## [1.3.1] — 2026-05-19
 
 ### Fixed

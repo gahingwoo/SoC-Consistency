@@ -296,6 +296,8 @@ socc generate COMMAND [OPTIONS] DTS_FILE
 | `socc generate diagram` | `socc generate-diagram` | Mermaid / PlantUML / ASCII topology diagram |
 | `socc generate compliance` | `socc generate-compliance` | ISO 26262 / IEC 61508 functional-safety report |
 | `socc generate report` | `socc generate-report` | Self-contained HTML architecture report |
+| `socc generate ci` | — | GitHub Actions / GitLab CI workflow for automated DTS checking |
+| `socc generate docs` | — | Human-readable Markdown or HTML peripheral inventory from a DTS file |
 
 ---
 
@@ -416,8 +418,7 @@ is included at [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
 ## Changelog
 
 | Version | Highlights |
-|---------|-----------|
-| **v1.3.1** | Fix SoC YAML data not bundled in wheel; path-traversal guard; renderer message fix |
+|---------|-----------|| **v1.4.0** | 6 new rules (DMA-001/002, PD-007, THM-004/005, CK-107); `generate ci`, `generate docs`, `audit sku`, `check --binding` || **v1.3.1** | Fix SoC YAML data not bundled in wheel; path-traversal guard; renderer message fix |
 | **v1.3.0** | Behavioural simulation engine (`socc sim scenario`) — PS/CG/RS violation codes |
 | **v1.2.3** | Rule MM-006 (node-name/reg mismatch); `socc-expect` annotations; `socc decompile` |
 | **v1.2.2** | `--strict` CI mode; `socc explain`; `smart-diff --semantic` |

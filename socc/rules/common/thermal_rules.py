@@ -213,6 +213,103 @@ class THM003PassiveZeroPollingDelay(BaseRule):
         return violations
 
 
+class THM004MissingThermalSensor(BaseRule):
+    """THM-004: Thermal zone references no thermal-sensors.
+
+    Every thermal zone must have at least one ``thermal-sensors`` phandle that
+    points to a temperature sensor node.  Without a sensor the kernel thermal
+    driver cannot read temperature and the zone is effectively disabled —
+    all trip points become unreachable.
+    """
+
+    code = "THM-004"
+    name = "Thermal Zone Missing Sensor Binding"
+    description = (
+        "A thermal zone does not reference any temperature sensor via "
+        "``thermal-sensors``.  The zone cannot monitor temperature and all "
+        "its trip points are permanently inactive."
+    )
+    severity = "error"
+
+    def check(self, model: SoC, context: CheckContext) -> List[Violation]:
+        violations: List[Violation] = []
+        for zone_name, zone in model.thermal_zones.items():
+            if not getattr(zone, "has_sensor", True):
+                violations.append(self._create_violation(
+                    message=(
+                        f"Thermal zone '{zone_name}' has no 'thermal-sensors' "
+                        "binding — temperature monitoring is inactive."
+                    ),
+                    impact=(
+                        "The kernel thermal framework cannot read temperature "
+                        "for this zone.  Throttling and shutdown trip points "
+                        "will never fire."
+                    ),
+                    suggestion=(
+                        "Add a thermal-sensors property pointing to the SoC's "
+                        "temperature sensor, e.g.:\n"
+                        f"  &{zone_name} {{\n"
+                        "      thermal-sensors = <&tsadc 0>;\n"
+                        "  }};"
+                    ),
+                    location=f"/thermal-zones/{zone_name}",
+                    affected_nodes=[zone_name],
+                ))
+        return violations
+
+
+class THM005MissingCoolingDevice(BaseRule):
+    """THM-005: Passive thermal zone has no cooling-device binding.
+
+    A thermal zone with a *passive* trip point must declare at least one
+    ``cooling-device`` reference (typically a DVFS-capable CPU or GPU node).
+    Without it the kernel cannot perform frequency scaling and the passive
+    trip becomes a no-op.
+    """
+
+    code = "THM-005"
+    name = "Passive Zone Missing Cooling Device"
+    description = (
+        "A thermal zone has a passive trip point but no ``cooling-device`` "
+        "entry in its ``cooling-maps``.  CPU/GPU frequency scaling cannot be "
+        "triggered and the passive trip has no effect."
+    )
+    severity = "warning"
+
+    def check(self, model: SoC, context: CheckContext) -> List[Violation]:
+        violations: List[Violation] = []
+        for zone_name, zone in model.thermal_zones.items():
+            has_passive = any(t.trip_type == "passive" for t in zone.trips)
+            if not has_passive:
+                continue
+            has_cooling = bool(zone.cooling_devices)
+            if not has_cooling:
+                violations.append(self._create_violation(
+                    message=(
+                        f"Thermal zone '{zone_name}' has a passive trip but "
+                        "no cooling-device bindings in cooling-maps."
+                    ),
+                    impact=(
+                        "Passive throttling will never activate — the zone "
+                        "reaches critical temperature with no intermediate "
+                        "cooling step."
+                    ),
+                    suggestion=(
+                        "Add a cooling-maps section that maps the passive trip "
+                        "to a DVFS CPU/GPU node, e.g.:\n"
+                        "  cooling-maps {\n"
+                        "      map0 {\n"
+                        "          trip = <&cpu_alert0>;\n"
+                        "          cooling-device = <&cpu0 THERMAL_NO_LIMIT 4>;\n"
+                        "      };\n"
+                        "  };"
+                    ),
+                    location=f"/thermal-zones/{zone_name}",
+                    affected_nodes=[zone_name],
+                ))
+        return violations
+
+
 # ── Registration ──────────────────────────────────────────────────────────────
 
 
@@ -221,12 +318,16 @@ def register_thermal_rules(registry, soc_name: str = "common") -> None:
     registry.register(THM001CriticalTripOverTjMax(), soc_name)
     registry.register(THM002MissingCriticalTrip(), soc_name)
     registry.register(THM003PassiveZeroPollingDelay(), soc_name)
+    registry.register(THM004MissingThermalSensor(), soc_name)
+    registry.register(THM005MissingCoolingDevice(), soc_name)
 
 
 __all__ = [
     "THM001CriticalTripOverTjMax",
     "THM002MissingCriticalTrip",
     "THM003PassiveZeroPollingDelay",
+    "THM004MissingThermalSensor",
+    "THM005MissingCoolingDevice",
     "register_thermal_rules",
     "_TJ_MAX_MC",
     "_tj_max",

@@ -14,6 +14,7 @@ from .power_audit_rules import register_power_audit_rules
 from .sec_rules import register_sec_rules
 from .bw_rules import register_bw_rules
 from .reg_rules import register_reg_rules
+from .iommu_rules import register_iommu_rules
 
 
 class GEN401OrphanedNode(BaseRule):
@@ -58,6 +59,7 @@ class GEN401OrphanedNode(BaseRule):
 def register_common_rules(registry, soc_name: str = "common") -> None:
     """Register common rules into *registry*."""
     registry.register(GEN401OrphanedNode(), soc_name)
+    register_iommu_rules(registry, soc_name)
     register_netlist_rules(registry, soc_name)
     register_common_power_rules(registry, soc_name)
     register_thermal_rules(registry, soc_name)

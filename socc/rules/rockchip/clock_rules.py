@@ -259,6 +259,112 @@ class CK106ClockSourceContention(BaseRule):
         return violations
 
 
+class CK107AssignedClockRatesMissing(BaseRule):
+    """CK-107: Device requires ``assigned-clock-rates`` but none is declared.
+
+    Certain peripherals (USB3 PHY, MIPI DSI/CSI, HDMI TX, PCIe) need a
+    specific reference clock rate set at boot via ``assigned-clock-rates``.
+    If this property is absent the kernel falls back to a hardware default
+    that may differ from the required value, causing the peripheral to
+    operate at the wrong speed — or not at all — without any error message.
+
+    The SoC constraint YAML declares which node types require an explicit
+    rate via the ``requires_clock_rate`` flag on clock entries.
+    """
+
+    code = "CK-107"
+    name = "assigned-clock-rates Missing on Rate-Critical Device"
+    description = (
+        "A device that requires an explicit ``assigned-clock-rates`` property "
+        "does not declare one.  The peripheral will use a hardware default rate "
+        "that may be wrong, causing silent malfunction."
+    )
+    severity = "warning"
+
+    # Device compatible substrings that are known to require explicit clock rates.
+    # Drawn from upstream kernel binding documentation.
+    _RATE_CRITICAL_TOKENS = frozenset({
+        "usb3", "usb3phy", "dwc3", "xhci",
+        "pcie", "pcie-phy",
+        "mipi-dsi", "mipi-csi", "dsi", "csi2",
+        "hdmi", "dp", "edp",
+        "ufs",
+        "emmc", "sdhci",
+    })
+
+    def check(self, model: SoC, context: CheckContext) -> List[Violation]:
+        violations: List[Violation] = []
+
+        # Honour an explicit list from constraints first
+        req_nodes: set = set(
+            context.metadata.get("requires_clock_rate_nodes", [])
+        )
+
+        for dev_name, dev_node in model.devices.items():
+            compat = dev_node.properties.get("compatible", "")
+            if isinstance(compat, (list, tuple)):
+                compat_str = " ".join(str(c) for c in compat).lower()
+            else:
+                compat_str = str(compat).lower()
+
+            is_critical = (
+                dev_name in req_nodes
+                or any(tok in compat_str for tok in self._RATE_CRITICAL_TOKENS)
+            )
+            if not is_critical:
+                continue
+
+            # Must have assigned-clocks + assigned-clock-rates together
+            has_assigned_clocks = dev_node.has_property("assigned-clocks")
+            has_assigned_rates = dev_node.has_property("assigned-clock-rates")
+
+            if has_assigned_clocks and not has_assigned_rates:
+                violations.append(self._create_violation(
+                    message=(
+                        f"Device '{dev_name}' declares 'assigned-clocks' "
+                        "but is missing 'assigned-clock-rates'."
+                    ),
+                    impact=(
+                        "The clock mux is set but the rate is not configured. "
+                        "The peripheral will run at an unpredictable default "
+                        "frequency, causing silent malfunction or link training "
+                        "failure."
+                    ),
+                    suggestion=(
+                        f"Add 'assigned-clock-rates' to '{dev_name}' with the "
+                        "target frequency from the SoC TRM, e.g.:\n"
+                        f"  &{dev_name} {{\n"
+                        "      assigned-clock-rates = <500000000>;\n"
+                        "  }};"
+                    ),
+                    location=f"/{dev_name}",
+                    affected_nodes=[dev_name],
+                ))
+            elif not has_assigned_clocks and not has_assigned_rates:
+                # No clock assignment at all for a rate-critical device
+                violations.append(self._create_violation(
+                    message=(
+                        f"Rate-critical device '{dev_name}' has neither "
+                        "'assigned-clocks' nor 'assigned-clock-rates'."
+                    ),
+                    impact=(
+                        "Clock rate defaults to hardware POR value which may "
+                        "differ from the specification, causing malfunction."
+                    ),
+                    suggestion=(
+                        f"Add 'assigned-clocks' and 'assigned-clock-rates' to "
+                        f"'{dev_name}':\n"
+                        f"  &{dev_name} {{\n"
+                        "      assigned-clocks = <&cru CLK_USB3>;\n"
+                        "      assigned-clock-rates = <500000000>;\n"
+                        "  }};"
+                    ),
+                    location=f"/{dev_name}",
+                    affected_nodes=[dev_name],
+                ))
+        return violations
+
+
 def register_rockchip_clock_rules(registry, soc_name: str) -> None:
     """Register Rockchip clock rules."""
     registry.register(CK101ClockTreeCycleDetected(), soc_name)
@@ -267,3 +373,4 @@ def register_rockchip_clock_rules(registry, soc_name: str) -> None:
     registry.register(CK104ClockProviderOrphaned(), soc_name)
     registry.register(CK105DividerInvalid(), soc_name)
     registry.register(CK106ClockSourceContention(), soc_name)
+    registry.register(CK107AssignedClockRatesMissing(), soc_name)
