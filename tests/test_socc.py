@@ -1339,6 +1339,7 @@ class TestPreprocessIncludeDirs:
         pp.preprocess_file(str(f), include_dirs=["/linux/include", "/extra"])
 
         cmd = captured["cmd"]
+        assert "-E" in cmd, "-E must be present so clang/gcc stop at preprocessing"
         assert "-I/linux/include" in cmd
         assert "-I/extra" in cmd
 

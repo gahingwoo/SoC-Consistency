@@ -81,7 +81,7 @@ def detect_unpreprocessed(content: str, path: str = "") -> Optional[str]:
         m = pattern.search(cleaned)
         if m:
             path_hint = f" in {path!r}" if path else ""
-            cpp_cmd = f"cpp -x assembler-with-cpp -P {path or '<file>'}"
+            cpp_cmd = f"cpp -E -x assembler-with-cpp -P {path or '<file>'}"
             return (
                 f"This DTS appears unpreprocessed{path_hint} — "
                 f"found {label} at line {_line_of(m.start())}.\n"
@@ -200,8 +200,10 @@ def _cpp_preprocess(path: str, include_dirs: Optional[list] = None) -> str:
     # Then add any user-supplied include directories (e.g. kernel dt-bindings).
     src_dir = str(Path(path).parent)
     include_flags = [f"-I{src_dir}"] + [f"-I{d}" for d in (include_dirs or [])]
+    # Always pass -E so that clang/gcc stop at the preprocessor stage.
+    # For the standalone `cpp` binary -E is redundant but harmless.
     result = subprocess.run(
-        [cpp_exe, "-x", "assembler-with-cpp", "-P", *include_flags, path],
+        [cpp_exe, "-E", "-x", "assembler-with-cpp", "-P", *include_flags, path],
         capture_output=True,
         text=True,
         timeout=30,

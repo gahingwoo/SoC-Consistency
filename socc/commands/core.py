@@ -168,7 +168,7 @@ def _run_dt_validate(dts_file: str, use_color=None) -> None:
                     "(useful in scripts; equivalent to --preprocess for raw input)."))
 @click.option("--include", "include_paths", multiple=True, metavar="DIR",
               help=("Add DIR to the cpp include search path (can be repeated). "
-                    "Example: --include /linux/include/dt-bindings"))
+                    "Example: --include /path/to/linux/include"))
 def check(dts_file, soc, output_format, min_severity, ignore_rule,
           skip_rules, color, demo, netlist_csv, watch, no_cache,
           rules_dirs, git_since, strict, dt_binding,
