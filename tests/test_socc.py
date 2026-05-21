@@ -1431,3 +1431,56 @@ class TestCLIPreprocessFlags:
         )
         assert "/linux/include" in (captured.get("include_dirs") or [])
         assert "/extra" in (captured.get("include_dirs") or [])
+
+
+class TestCppPreprocessIntegration:
+    """Real subprocess integration tests — skipped when no CPP is on PATH.
+
+    These tests exercise the actual ``_cpp_preprocess`` function end-to-end
+    and are intentionally *not* mocked, so that environment-specific breakage
+    (e.g. Apple /usr/bin/cpp on macOS) surfaces as a test failure.
+    """
+
+    import shutil as _sh
+    _HAS_CPP = bool(
+        _sh.which("clang") or _sh.which("gcc") or _sh.which("cpp")
+    )
+
+    @pytest.mark.skipif(not _HAS_CPP, reason="no C preprocessor on PATH")
+    def test_macro_expansion(self, tmp_path):
+        """#define macros must be expanded; raw macro name must not appear."""
+        from socc import preprocess as pp
+
+        dts = tmp_path / "macros.dts"
+        dts.write_text(
+            "#define MY_FREQ 24000000\n"
+            "/dts-v1/;\n"
+            "/ { clock-frequency = <MY_FREQ>; };\n"
+        )
+        result = pp._cpp_preprocess(str(dts))
+        assert "24000000" in result
+        assert "MY_FREQ" not in result
+
+    @pytest.mark.skipif(not _HAS_CPP, reason="no C preprocessor on PATH")
+    def test_clean_dts_passes_through(self, tmp_path):
+        """Plain DTS with no macros should survive preprocessing unchanged."""
+        from socc import preprocess as pp
+
+        dts = tmp_path / "clean.dts"
+        dts.write_text('/dts-v1/;\n/ { model = "smoke"; };\n')
+        result = pp._cpp_preprocess(str(dts))
+        assert "/dts-v1/" in result
+        assert '"smoke"' in result
+
+    @pytest.mark.skipif(not _HAS_CPP, reason="no C preprocessor on PATH")
+    def test_preferred_tool_passes_smoke(self):
+        """_find_cpp() must return a non-None value and it must not be a broken tool."""
+        from socc import preprocess as pp
+        # Clear the lru_cache so we get a fresh probe (important if other tests
+        # ran in the same process with a mocked _find_cpp).
+        pp._find_cpp.cache_clear()
+        exe = pp._find_cpp()
+        assert exe is not None, (
+            "_find_cpp() returned None even though a CPP binary exists on PATH — "
+            "the smoke test rejected all candidates; check your cpp/clang/gcc install."
+        )

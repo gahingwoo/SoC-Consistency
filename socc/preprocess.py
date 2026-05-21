@@ -19,9 +19,12 @@ Usage model
 
 from __future__ import annotations
 
+import functools
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -119,11 +122,50 @@ def is_dtb(path: str) -> bool:
 
 # ── Tool discovery & install hints ───────────────────────────────────────────
 
+# Minimal DTS used to smoke-test CPP candidates.
+_SMOKE_DTS = b"/dts-v1/;\n/ { #address-cells = <1>; };\n"
+
+# Preferred order: clang first because Apple's /usr/bin/cpp wrapper is unreliable
+# with -x assembler-with-cpp on macOS.  cpp is tried last as a last resort.
+_CPP_CANDIDATES = ("clang", "gcc", "cpp")
+
+
+@functools.lru_cache(maxsize=1)
 def _find_cpp() -> Optional[str]:
-    for candidate in ("cpp", "clang", "gcc"):
+    """Return the path to a working C preprocessor, or None.
+
+    Each candidate is verified with a minimal DTS smoke test before being
+    accepted.  This automatically skips binaries that are present on PATH
+    but fail with the flags socc needs (e.g. Apple\'s cpp wrapper on macOS).
+    Result is cached so the subprocess is only spawned once per process.
+    """
+    for candidate in _CPP_CANDIDATES:
         exe = shutil.which(candidate)
-        if exe:
-            return exe
+        if not exe:
+            continue
+        tmp: Optional[str] = None
+        try:
+            fd, tmp = tempfile.mkstemp(suffix=".dts")
+            try:
+                os.write(fd, _SMOKE_DTS)
+            finally:
+                os.close(fd)
+            result = subprocess.run(
+                [exe, "-E", "-x", "assembler-with-cpp", "-P", tmp],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and "/dts-v1/" in result.stdout:
+                return exe
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
     return None
 
 
