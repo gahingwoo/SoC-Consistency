@@ -3,6 +3,7 @@
 from .power_rules import ML001AOEEDomainMismatch, ML002MissingVDDAO, ML003PowerTreeCycle
 from .clock_rules import ML101CLKCMissing, ML102InvalidClockFrequency, ML103AOClockCrossing
 from .gpio_rules import ML201GPIOControllerMissing, ML202GPIOBankVoltageMismatch, ML203AOPinctrlCrossing
+from .sec_rules import ML301SecureMonitorMissing, register_amlogic_sec_rules
 
 
 # Amlogic SoC family names recognized by this rule set
@@ -46,8 +47,13 @@ def register_amlogic_rules(registry, soc_name: str) -> None:
     registry.register(ML202GPIOBankVoltageMismatch(), soc_name)
     registry.register(ML203AOPinctrlCrossing(), soc_name)
 
+    # Security rules
+    register_amlogic_sec_rules(registry, soc_name)
+
 
 __all__ = [
     "register_amlogic_rules",
+    "register_amlogic_sec_rules",
+    "ML301SecureMonitorMissing",
     "AMLOGIC_SOC_NAMES",
 ]

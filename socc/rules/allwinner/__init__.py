@@ -3,6 +3,7 @@
 from .clock_rules import AW101CCUClockProviderMissing, AW102InvalidClockFrequency, AW103RCCURequired
 from .power_rules import AW001PMICSupplyMissing, AW002RegulatorVoltageOutOfRange, AW003PowerTreeCycle
 from .gpio_rules import AW201PioNodeMissing, AW202BankVoltageMismatch, AW203TooManyPinsPerDevice
+from .iommu_rules import AW301IommuMasterIdCollision, register_allwinner_iommu_rules
 
 
 # Allwinner SoC names recognized by this rule set
@@ -43,8 +44,13 @@ def register_allwinner_rules(registry, soc_name: str) -> None:
     registry.register(AW202BankVoltageMismatch(), soc_name)
     registry.register(AW203TooManyPinsPerDevice(), soc_name)
 
+    # IOMMU rules
+    register_allwinner_iommu_rules(registry, soc_name)
+
 
 __all__ = [
     "register_allwinner_rules",
+    "register_allwinner_iommu_rules",
+    "AW301IommuMasterIdCollision",
     "ALLWINNER_SOC_NAMES",
 ]
