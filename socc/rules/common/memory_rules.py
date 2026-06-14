@@ -1,4 +1,8 @@
-"""Rockchip memory rules."""
+"""Common memory rules.
+
+Constraint-metadata driven and SoC-agnostic; fires only when the caller
+supplies ``memory`` / ``memory_timing`` / ``memory_capacity`` keys.
+"""
 
 from typing import List, Dict, Set
 from socc.model import SoC
@@ -216,8 +220,8 @@ class MEM303CapacityAllocation(BaseRule):
         return violations
 
 
-def register_rockchip_memory_rules(registry, soc_name: str) -> None:
-    """Register Rockchip memory rules."""
+def register_common_memory_rules(registry, soc_name: str = "common") -> None:
+    """Register common memory rules."""
     registry.register(MEM301AddressingError(), soc_name)
     registry.register(MEM302TimingConstraint(), soc_name)
     registry.register(MEM303CapacityAllocation(), soc_name)

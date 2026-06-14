@@ -1,4 +1,8 @@
-"""Rockchip interrupt rules (IRQ, FIQ, etc.)."""
+"""Common interrupt rules (IRQ, FIQ, etc.).
+
+Constraint-metadata driven and SoC-agnostic; fires only when the caller
+supplies ``interrupt_allocation`` / ``interrupt_priority`` keys.
+"""
 
 from typing import List, Dict, Set
 from socc.model import SoC
@@ -144,7 +148,7 @@ class IRQ502InterruptPriorityConflict(BaseRule):
         return violations
 
 
-def register_rockchip_interrupt_rules(registry, soc_name: str) -> None:
-    """Register Rockchip interrupt rules."""
+def register_common_interrupt_rules(registry, soc_name: str = "common") -> None:
+    """Register common interrupt rules."""
     registry.register(IRQ501DuplicateInterrupt(), soc_name)
     registry.register(IRQ502InterruptPriorityConflict(), soc_name)

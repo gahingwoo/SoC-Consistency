@@ -1,4 +1,4 @@
-"""Common power-supply rules (PD-007 / PD-008).
+"""Common power-supply rules (PD-007 / PD-008 / PD-009).
 
 PD-007  IO-before-Core Sequencing
     An IO supply (1.8–3.3 V) that feeds a core supply (<1.2 V) must be
@@ -10,6 +10,10 @@ PD-008  PMIC Channel Current Over-Commitment
     When a PMIC YAML constraint file lists ``max_current_ma`` for a channel
     and the SoC model can estimate total load, a warning is raised when the
     total theoretical draw exceeds the channel limit.
+
+PD-009  power-domains / power-domain-names Count Mismatch
+    When a device declares both lists, genpd requires equal lengths; a
+    mismatch silently drops the extra references.  Vendor-agnostic.
 """
 
 from typing import List
@@ -175,14 +179,80 @@ class PD008CurrentOvercommit(BaseRule):
         return violations
 
 
+class PD009PowerDomainNamesMismatch(BaseRule):
+    """PD-009: power-domains / power-domain-names count mismatch.
+
+    In the Linux kernel's generic power domain framework (genpd), when a
+    device declares both ``power-domains`` and ``power-domain-names``, the
+    two lists must have the same number of entries.  A mismatch causes
+    ``of_pm_find_power_domain_dev()`` to return NULL for the extra entries,
+    silently failing to attach the power domain.  The device probe either
+    falls back to an un-gated domain or emits a cryptic ENODEV error.
+
+    This is one of the most common silent bugs in vendor BSP DTS files for
+    modern multi-cluster SoCs (RK3588, i.MX8MP, SM8250); the check is
+    vendor-agnostic and lives in the common rule set.
+    """
+
+    code = "PD-009"
+    name = "power-domain-names Count Mismatch"
+    description = (
+        "The number of entries in ``power-domains`` and ``power-domain-names`` "
+        "must be identical.  A mismatch silently drops the extra power-domain "
+        "references, leaving sub-domains un-gated."
+    )
+    severity = "error"
+
+    def check(self, model: SoC, context: CheckContext) -> List[Violation]:
+        violations: List[Violation] = []
+        for dev_name, dev_node in model.devices.items():
+            pd_val = dev_node.properties.get("power-domains")
+            pdn_val = dev_node.properties.get("power-domain-names")
+            if pd_val is None or pdn_val is None:
+                continue  # either property absent — not a mismatch
+            # Normalise to lists for counting
+            pd_list = pd_val if isinstance(pd_val, (list, tuple)) else [pd_val]
+            pdn_list = pdn_val if isinstance(pdn_val, (list, tuple)) else [pdn_val]
+            # Filter out numeric phandle cell arguments; count phandle entries
+            pd_phandles = [v for v in pd_list if isinstance(v, str) and v.startswith("&")]
+            # If the parser stores as flat list of mixed phandle+int, fall back
+            # to the raw list length for the phandle side
+            pd_count = len(pd_phandles) if pd_phandles else len(pd_list)
+            pdn_count = len(pdn_list)
+            if pd_count != pdn_count:
+                violations.append(self._create_violation(
+                    message=(
+                        f"Device '{dev_name}' has {pd_count} power-domains "
+                        f"but {pdn_count} power-domain-names entries."
+                    ),
+                    impact=(
+                        "of_pm_find_power_domain_dev() returns NULL for the "
+                        "mismatched entries.  Affected sub-domains may remain "
+                        "permanently gated or permanently enabled, causing "
+                        "driver probe failure (ENODEV) or unexpected power draw."
+                    ),
+                    suggestion=(
+                        f"Ensure power-domain-names has exactly {pd_count} "
+                        "string entries — one per phandle in power-domains:\n"
+                        f"  power-domain-names = "
+                        + ", ".join(f'"pd{i}"' for i in range(pd_count)) + ";"
+                    ),
+                    location=f"/{dev_name}",
+                    affected_nodes=[dev_name],
+                ))
+        return violations
+
+
 def register_common_power_rules(registry, soc_name: str = "common") -> None:
-    """Register PD-007 and PD-008 into *registry*."""
+    """Register PD-007, PD-008 and PD-009 into *registry*."""
     registry.register(PD007IOBeforeCoreSequence(), soc_name)
     registry.register(PD008CurrentOvercommit(), soc_name)
+    registry.register(PD009PowerDomainNamesMismatch(), soc_name)
 
 
 __all__ = [
     "register_common_power_rules",
     "PD007IOBeforeCoreSequence",
     "PD008CurrentOvercommit",
+    "PD009PowerDomainNamesMismatch",
 ]

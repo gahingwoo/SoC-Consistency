@@ -15,6 +15,9 @@ from .sec_rules import register_sec_rules
 from .bw_rules import register_bw_rules
 from .reg_rules import register_reg_rules
 from .iommu_rules import register_iommu_rules
+from .bus_rules import register_common_bus_rules
+from .interrupt_rules import register_common_interrupt_rules
+from .memory_rules import register_common_memory_rules
 
 
 class GEN401OrphanedNode(BaseRule):
@@ -108,6 +111,9 @@ def register_common_rules(registry, soc_name: str = "common") -> None:
     register_sec_rules(registry, soc_name)
     register_bw_rules(registry, soc_name)
     register_reg_rules(registry, soc_name)
+    register_common_bus_rules(registry, soc_name)
+    register_common_interrupt_rules(registry, soc_name)
+    register_common_memory_rules(registry, soc_name)
 
 
 __all__ = [
@@ -118,4 +124,7 @@ __all__ = [
     "register_pin_rules",
     "register_compat_rules",
     "register_power_audit_rules",
+    "register_common_bus_rules",
+    "register_common_interrupt_rules",
+    "register_common_memory_rules",
 ]

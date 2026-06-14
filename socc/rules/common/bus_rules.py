@@ -1,4 +1,9 @@
-"""Rockchip bus rules (AHB, APB, AXI, etc.)."""
+"""Common bus rules (AHB, APB, AXI, etc.).
+
+These checks are constraint-metadata driven and SoC-agnostic: they only fire
+when the caller supplies the relevant ``bus_slaves`` / ``bus_frequency`` /
+``slave_latency`` keys, so they are registered once for every target.
+"""
 
 from typing import List, Dict, Set
 from socc.model import SoC
@@ -174,8 +179,8 @@ class BUS403SlaveResponseTimeout(BaseRule):
         return violations
 
 
-def register_rockchip_bus_rules(registry, soc_name: str) -> None:
-    """Register Rockchip bus rules."""
+def register_common_bus_rules(registry, soc_name: str = "common") -> None:
+    """Register common bus rules."""
     registry.register(BUS401SlaveAddressCollision(), soc_name)
     registry.register(BUS402FrequencyMismatch(), soc_name)
     registry.register(BUS403SlaveResponseTimeout(), soc_name)
