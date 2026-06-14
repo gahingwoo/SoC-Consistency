@@ -397,30 +397,106 @@ def render_qemu_machine_c(spec: QEMUMachineSpec) -> str:
      */
 
     #include "qemu/osdep.h"
+    #include "qemu/units.h"
     #include "qapi/error.h"
     #include "hw/arm/boot.h"
-    #include "hw/intc/arm_gic.h"
+    #include "hw/intc/arm_gicv3_common.h"
     #include "hw/char/pl011.h"
     #include "hw/misc/unimp.h"
+    #include "hw/qdev-properties.h"
+    #include "hw/sysbus.h"
     #include "hw/boards.h"
     #include "sysemu/sysemu.h"
+    #include "target/arm/cpu.h"
 
     #define {soc_upper}_RAM_BASE        0x{spec.ram_base:x}ULL
     #define {soc_upper}_RAM_SIZE_MB     {spec.ram_size_mb}
-    #define {soc_upper}_GIC_BASE        0x{spec.gic_base or 0x08000000:x}ULL
+    #define {soc_upper}_GIC_DIST_BASE   0x{spec.gic_base or 0x08000000:x}ULL
+    #define {soc_upper}_GIC_DIST_SIZE   0x{spec.gic_dist_size:x}
+    /* GICv3 redistributors sit immediately after the distributor region. */
+    #define {soc_upper}_GIC_REDIST_BASE ({soc_upper}_GIC_DIST_BASE + {soc_upper}_GIC_DIST_SIZE)
+    #define {soc_upper}_NUM_SPIS        224                /* SPIs available to peripherals */
     #define {soc_upper}_UART0_BASE      0x{spec.uart_base or 0xFE2B0000:x}ULL
-    #define {soc_upper}_UART0_IRQ       {spec.uart_irq or 32}
+    #define {soc_upper}_UART0_IRQ       {spec.uart_irq or 32}  /* GIC SPI number */
     #define {soc_upper}_REF_CLOCK_HZ   {spec.ref_clock_hz}
+
+    /* GIC internal interrupt numbering (per CPU). */
+    #define ARCH_GIC_MAINT_IRQ  9
+    #define ARCH_TIMER_VIRT_IRQ 11
+    #define ARCH_TIMER_S_EL1_IRQ 13
+    #define ARCH_TIMER_NS_EL1_IRQ 14
+    #define ARCH_TIMER_NS_EL2_IRQ 10
+    #define VIRTUAL_PMU_IRQ      7
 
     typedef struct {{
         MachineState parent;
-        /* TODO: add SoC-specific state here */
+        ARMCPU      *cpus[{spec.num_cores}];
+        DeviceState *gic;
     }} {soc_upper}MachineState;
+
+    #define TYPE_{soc_upper}_MACHINE MACHINE_TYPE_NAME("{soc_lower}")
+    OBJECT_DECLARE_SIMPLE_TYPE({soc_upper}MachineState, {soc_upper}_MACHINE)
+
+    static void {soc_lower}_create_gic({soc_upper}MachineState *s)
+    {{
+        SysBusDevice *gicbusdev;
+        unsigned smp_cpus = {spec.num_cores};
+        int i;
+
+        s->gic = qdev_new(gicv3_class_name());
+        qdev_prop_set_uint32(s->gic, "revision", 3);
+        qdev_prop_set_uint32(s->gic, "num-cpu", smp_cpus);
+        /* 32 internal (SGI/PPI) + SPIs, rounded as the GIC requires. */
+        qdev_prop_set_uint32(s->gic, "num-irq", {soc_upper}_NUM_SPIS + 32);
+        qdev_prop_set_bit(s->gic, "has-security-extensions", true);
+        qdev_prop_set_uint32(s->gic, "len-redist-region-count", 1);
+        qdev_prop_set_uint32(s->gic, "redist-region-count[0]", smp_cpus);
+
+        gicbusdev = SYS_BUS_DEVICE(s->gic);
+        sysbus_realize_and_unref(gicbusdev, &error_fatal);
+        sysbus_mmio_map(gicbusdev, 0, {soc_upper}_GIC_DIST_BASE);
+        sysbus_mmio_map(gicbusdev, 1, {soc_upper}_GIC_REDIST_BASE);
+
+        /* Wire each CPU's IRQ/FIQ inputs and timer/maintenance PPIs. */
+        for (i = 0; i < smp_cpus; i++) {{
+            DeviceState *cpudev = DEVICE(s->cpus[i]);
+            int ppibase = {soc_upper}_NUM_SPIS + 32 + i * GIC_INTERNAL;
+            int irq;
+            const int timer_irqs[] = {{
+                ARCH_TIMER_NS_EL1_IRQ, ARCH_TIMER_VIRT_IRQ,
+                ARCH_TIMER_S_EL1_IRQ,  ARCH_TIMER_NS_EL2_IRQ,
+            }};
+
+            for (irq = 0; irq < ARRAY_SIZE(timer_irqs); irq++) {{
+                qdev_connect_gpio_out(cpudev, irq,
+                    qdev_get_gpio_in(s->gic, ppibase + timer_irqs[irq]));
+            }}
+
+            sysbus_connect_irq(gicbusdev, i,
+                qdev_get_gpio_in(cpudev, ARM_CPU_IRQ));
+            sysbus_connect_irq(gicbusdev, i + smp_cpus,
+                qdev_get_gpio_in(cpudev, ARM_CPU_FIQ));
+            sysbus_connect_irq(gicbusdev, i + 2 * smp_cpus,
+                qdev_get_gpio_in(cpudev, ARM_CPU_VIRQ));
+            sysbus_connect_irq(gicbusdev, i + 3 * smp_cpus,
+                qdev_get_gpio_in(cpudev, ARM_CPU_VFIQ));
+        }}
+    }}
 
     static void {soc_lower}_machine_init(MachineState *machine)
     {{
+        {soc_upper}MachineState *s = {soc_upper}_MACHINE(machine);
         MemoryRegion *sysmem = get_system_memory();
         MemoryRegion *ram    = g_new(MemoryRegion, 1);
+        int n;
+
+        /* CPUs */
+        for (n = 0; n < machine->smp.cpus; n++) {{
+            Object *cpuobj = object_new(machine->cpu_type);
+            object_property_set_bool(cpuobj, "has_el3", false, &error_fatal);
+            qdev_realize(DEVICE(cpuobj), NULL, &error_fatal);
+            s->cpus[n] = ARM_CPU(cpuobj);
+        }}
 
         /* RAM */
         memory_region_init_ram(ram, NULL, "ram",
@@ -428,14 +504,16 @@ def render_qemu_machine_c(spec: QEMUMachineSpec) -> str:
         memory_region_add_subregion(sysmem,
                                     {soc_upper}_RAM_BASE, ram);
 
-        /* GIC */
-        /* TODO: instantiate arm_gic or gicv3 at {soc_upper}_GIC_BASE */
+        /* GICv3 interrupt controller */
+        {soc_lower}_create_gic(s);
 
-        /* UART */
-        /* TODO: instantiate pl011 or serial_mm at {soc_upper}_UART0_BASE */
+        /* UART0 (PL011) — IRQ routed to the GIC SPI line above. */
+        pl011_create({soc_upper}_UART0_BASE,
+                     qdev_get_gpio_in(s->gic, {soc_upper}_UART0_IRQ),
+                     serial_hd(0));
 
         /* Load kernel + DTB */
-        arm_load_kernel(ARM_CPU(first_cpu), machine, &(struct arm_boot_info){{
+        arm_load_kernel(s->cpus[0], machine, &(struct arm_boot_info){{
             .ram_size      = machine->ram_size,
             .board_id      = -1,
             .loader_start  = {soc_upper}_RAM_BASE,
@@ -455,8 +533,9 @@ def render_qemu_machine_c(spec: QEMUMachineSpec) -> str:
     }}
 
     static const TypeInfo {soc_lower}_machine_typeinfo = {{
-        .name       = MACHINE_TYPE_NAME("{soc_lower}"),
-        .parent     = TYPE_MACHINE,
+        .name          = TYPE_{soc_upper}_MACHINE,
+        .parent        = TYPE_MACHINE,
+        .instance_size = sizeof({soc_upper}MachineState),
         .class_init = {soc_lower}_machine_class_init,
     }};
 
