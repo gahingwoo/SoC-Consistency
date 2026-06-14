@@ -17,88 +17,24 @@ DMA-002  ``iommus`` phandle references an undefined IOMMU controller
 
 from __future__ import annotations
 
-from typing import FrozenSet, List
+from typing import List
 
 from socc.model import SoC, Violation
 from socc.rules.base import BaseRule, CheckContext
-
-
-# ── Classifier: compatible substrings for DMA-capable devices ────────────────
-# Only IP blocks that perform DMA *directly* (not via an external DMA engine)
-# and therefore require an ``iommus`` group assignment are included.
-# Devices that use the DMA-engine subsystem (I2S, SPI, UART …) are excluded:
-# those use the DMA-engine's IOMMU group, not their own.
-
-_DMA_MASTER_TOKENS: FrozenSet[str] = frozenset({
-    # GPU
-    "gpu", "mali", "bifrost", "panfrost", "valhall",
-    # Video codec (integrated DMA engines, NOT pl330 clients)
-    "vpu", "vdec", "venc", "vepu", "rkvdec", "rkvenc",
-    # AV1 / VP9 hardware decoder
-    "av1-vpu", "vp9-vpu",
-    # Image signal processor
-    "rkisp", "isp",
-    # NPU / ML accelerator
-    "npu", "rknn", "rknn-core",
-    # USB host (XHCI/EHCI/DWC3 perform DMA directly)
-    "xhci", "ehci", "dwc3", "dwc2",
-    # PCIe root complex (DMA peer-to-peer)
-    "pcie",
-    # Ethernet MAC with integrated DMA
-    "gmac", "stmmac",
-    # Camera / MIPI-CSI DMA path
-    "mipi-csi", "csi2",
-})
-
-# Compatible substrings / node properties that disqualify a DMA-master match
-# even when a token above is present.
-_DMA_EXCLUDE_COMPAT: FrozenSet[str] = frozenset({
-    "grf",        # Rockchip GRF (general register file) — config syscon
-    "syscon",     # Generic system controller — no DMA
-    "-connector", # Connector stubs (hdmi-connector, etc.)
-})
-
-# Compatible substrings that identify IOMMU / SMMU controllers
-_IOMMU_CONTROLLER_TOKENS: FrozenSet[str] = frozenset({
-    "iommu", "smmu", "iommu-v1", "iommu-v2",
-    "rockchip,iommu", "arm,smmu", "arm,mmu-500",
-    "qcom,iommu", "qcom,smmu-500",
-    "fsl,imx8mp-iommu", "fsl,imx-iommu",
-    "allwinner,sun50i-iommu",
-})
-
-
-def _compat_str(props: dict) -> str:
-    val = props.get("compatible", "")
-    if isinstance(val, (list, tuple)):
-        return " ".join(str(v) for v in val).lower()
-    return str(val).lower()
+from socc.rules.common._classifiers import (
+    compat_str as _compat_str,
+    is_iommu_controller as _is_iommu_controller,
+    is_dma_master,
+)
 
 
 def _is_dma_master(compat: str, props: dict = None) -> bool:
-    """Return True only when the node is a direct DMA bus master.
+    """Return True only when the node is a direct DMA *client* of the IOMMU.
 
-    Excludes:
-    - syscon / GRF config register banks
-    - connector stubs
-    - DMA-engine clients that declare ``dmas`` (the engine holds the IOMMU group)
-    - DMA controller nodes themselves (pl330, axi-dmac)
+    Excludes syscons, connector stubs, DMA-engine clients that declare
+    ``dmas``, and the DMA controller nodes (pl330 / axi-dmac) themselves.
     """
-    # Disqualify by compatible substring first
-    if any(exc in compat for exc in _DMA_EXCLUDE_COMPAT):
-        return False
-    # DMA controller nodes are infrastructure, not clients
-    if "pl330" in compat or "axi-dmac" in compat:
-        return False
-    # Devices that use the DMA-engine subsystem (have a 'dmas' property)
-    # are NOT direct IOMMU clients — skip them
-    if props and "dmas" in props:
-        return False
-    return any(tok in compat for tok in _DMA_MASTER_TOKENS)
-
-
-def _is_iommu_controller(compat: str) -> bool:
-    return any(tok in compat for tok in _IOMMU_CONTROLLER_TOKENS)
+    return is_dma_master(compat, props, exclude_dma_engines=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ from typing import FrozenSet, List, Optional, Tuple
 
 from socc.model import SoC, Violation
 from socc.rules.base import BaseRule, CheckContext
+from socc.rules.common._classifiers import is_dma_master
 
 
 # ── Classifier sets ───────────────────────────────────────────────────────────
@@ -28,29 +29,6 @@ _SECURE_NAME_KEYWORDS: FrozenSet[str] = frozenset({
     "optee", "op-tee", "tee", "trustzone", "tz",
     "secure", "atf", "trusted", "sm",
     "sec-region", "fw-ddr",
-})
-
-_DMA_MASTER_COMPAT: FrozenSet[str] = frozenset({
-    # Video / multimedia (direct DMA, not via DMA engine)
-    "vpu", "vdec", "venc", "vepu", "rkvdec",
-    "av1-vpu", "vp9-vpu",
-    # Image signal processor
-    "rkisp", "isp",
-    # GPU
-    "gpu", "mali", "bifrost", "panfrost",
-    # NPU
-    "npu", "rknn",
-    # USB host (direct DMA)
-    "xhci", "ehci", "dwc3",
-    # PCIe
-    "pcie",
-    # Ethernet (direct DMA)
-    "gmac", "stmmac",
-})
-
-# Compatible substrings that disqualify DMA-master classification
-_DMA_MASTER_EXCLUDE: FrozenSet[str] = frozenset({
-    "grf", "syscon", "-connector",
 })
 
 _CRYPTO_COMPAT: FrozenSet[str] = frozenset({
@@ -158,12 +136,12 @@ class SEC201SecureMemoryLeakage(BaseRule):
         # Find DMA masters without explicit IOMMU protection
         for dev_name, dev_node in model.devices.items():
             compat = _get_compatible_str(dev_node.properties)
-            is_dma_master = (
-                (_has_kw(compat, _DMA_MASTER_COMPAT) or _has_kw(dev_name.lower(), _DMA_MASTER_COMPAT))
-                and not _has_kw(compat, _DMA_MASTER_EXCLUDE)
-                and "dmas" not in dev_node.properties
-            )
-            if not is_dma_master:
+            # A DMA engine (pl330 / axi-dmac) can itself reach secure memory, so
+            # — unlike the IOMMU rule — we do *not* exclude controller nodes here.
+            if not is_dma_master(
+                compat, dev_node.properties,
+                name=dev_name, match_name=True, exclude_dma_engines=False,
+            ):
                 continue
             # display-subsystem is a virtual bus aggregator, not a DMA master itself.
             if "display-subsystem" in compat:
