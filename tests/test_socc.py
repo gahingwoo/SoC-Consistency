@@ -1484,3 +1484,307 @@ class TestCppPreprocessIntegration:
             "_find_cpp() returned None even though a CPP binary exists on PATH — "
             "the smoke test rejected all candidates; check your cpp/clang/gcc install."
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 9. v1.5.0 IMPROVEMENTS — shared classifiers, NXP rules, common-rule parity,
+#    QEMU codegen, and parser byte-array / delete-directive support
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from socc.parser.dts_parser import parse_dts as _parse_dts
+
+
+class TestSharedClassifiers:
+    """The DMA-master / IOMMU classifiers shared by iommu_rules and sec_rules."""
+
+    def test_dma_master_basic(self):
+        from socc.rules.common._classifiers import is_dma_master
+        assert is_dma_master("rockchip,rk3588-gpu")
+        assert is_dma_master("snps,dwc3")
+        assert not is_dma_master("rockchip,rk3588-grf")        # syscon excluded
+        assert not is_dma_master("hdmi-connector")             # connector stub
+
+    def test_dma_engine_exclusion_is_parameterised(self):
+        from socc.rules.common._classifiers import is_dma_master
+        # A compat carrying both a DMA-engine token (pl330) and a master token (gpu).
+        # IOMMU view excludes DMA-engine controllers; security view does not.
+        compat = "vendor,pl330-gpu"
+        assert not is_dma_master(compat, exclude_dma_engines=True)
+        assert is_dma_master(compat, exclude_dma_engines=False)
+
+    def test_dmas_property_marks_engine_client(self):
+        from socc.rules.common._classifiers import is_dma_master
+        # a node with 'dmas' is a DMA-engine client, not a direct master
+        assert not is_dma_master("rockchip,rk3588-gpu", {"dmas": ["x"]})
+
+    def test_name_matching_opt_in(self):
+        from socc.rules.common._classifiers import is_dma_master
+        assert not is_dma_master("vendor,widget", name="gpu@fb000000")
+        assert is_dma_master("vendor,widget", name="gpu@fb000000", match_name=True)
+
+    def test_iommu_controller(self):
+        from socc.rules.common._classifiers import is_iommu_controller
+        assert is_iommu_controller("rockchip,iommu")
+        assert is_iommu_controller("arm,smmu-v3")
+        assert not is_iommu_controller("rockchip,rk3588-gpu")
+
+
+class TestNXPRules:
+    """The new NXP clock / power / gpio rule sets (IMX-1xx/2xx/3xx)."""
+
+    def _registry(self):
+        from socc.rules.registry import RuleRegistry
+        from socc.rules.nxp import register_all_nxp_rules
+        reg = RuleRegistry()
+        register_all_nxp_rules(reg, "imx8mp")
+        return reg
+
+    def test_all_nxp_codes_registered(self):
+        reg = self._registry()
+        codes = {r.code for r in reg.get_rules_for_soc("imx8mp")}
+        for code in ("IMX-101", "IMX-102", "IMX-201", "IMX-202", "IMX-301", "IMX-302"):
+            assert code in codes, f"{code} missing from NXP rule set"
+
+    def test_iomuxc_missing_fires_on_empty_model(self):
+        from socc.rules.nxp.imx_gpio_rules import IMX301IomuxcMissing
+        soc = SoC(name="imx8mp", power_tree=PowerTree(), clock_tree=ClockTree(),
+                  devices={}, device_supplies={}, device_clocks={})
+        v = IMX301IomuxcMissing().check(soc, CheckContext(soc_name="imx8mp"))
+        assert any(x.code == "IMX-301" for x in v)
+
+    def test_iomuxc_present_no_fire(self):
+        from socc.rules.nxp.imx_gpio_rules import IMX301IomuxcMissing
+        node = _irnode("iomuxc", props={"compatible": "fsl,imx8mp-iomuxc"})
+        soc = SoC(name="imx8mp", power_tree=PowerTree(), clock_tree=ClockTree(),
+                  devices={"iomuxc": node}, device_supplies={}, device_clocks={})
+        v = IMX301IomuxcMissing().check(soc, CheckContext(soc_name="imx8mp"))
+        assert v == []
+
+    def test_gpio_pin_out_of_range(self):
+        from socc.rules.nxp.imx_gpio_rules import IMX302GpioPinOutOfRange
+        soc = SoC(name="imx8mp", power_tree=PowerTree(), clock_tree=ClockTree(),
+                  devices={}, device_supplies={}, device_clocks={})
+        ctx = CheckContext(soc_name="imx8mp", metadata={"constraints": {
+            "gpio_allocation": {"led": {"bank": "gpio3", "pin": 40}}}})
+        v = IMX302GpioPinOutOfRange().check(soc, ctx)
+        assert any(x.code == "IMX-302" for x in v)
+
+    def test_gpio_pin_in_range_no_fire(self):
+        from socc.rules.nxp.imx_gpio_rules import IMX302GpioPinOutOfRange
+        soc = SoC(name="imx8mp", power_tree=PowerTree(), clock_tree=ClockTree(),
+                  devices={}, device_supplies={}, device_clocks={})
+        ctx = CheckContext(soc_name="imx8mp", metadata={"constraints": {
+            "gpio_allocation": {"led": {"bank": "gpio3", "pin": 7}}}})
+        assert IMX302GpioPinOutOfRange().check(soc, ctx) == []
+
+
+class TestCommonRuleParity:
+    """bus / interrupt / memory rules must now apply to every vendor."""
+
+    @pytest.mark.parametrize("vendor_reg,soc", [
+        ("socc.rules.qualcomm.register_qualcomm_rules", "sm8250"),
+        ("socc.rules.allwinner.register_allwinner_rules", "sun50i-h6"),
+        ("socc.rules.amlogic.register_amlogic_rules", "meson-g12b"),
+        ("socc.rules.nxp.register_all_nxp_rules", "imx8mp"),
+    ])
+    def test_vendor_gets_common_bus_irq_mem(self, vendor_reg, soc):
+        import importlib
+        from socc.rules.registry import RuleRegistry
+        from socc.rules.common import register_common_rules
+        mod_path, fn_name = vendor_reg.rsplit(".", 1)
+        fn = getattr(importlib.import_module(mod_path), fn_name)
+        reg = RuleRegistry()
+        register_common_rules(reg)
+        fn(reg, soc)
+        codes = {r.code for r in reg.get_rules_for_soc(soc)}
+        # PD-009 was promoted from rockchip-only to common as well
+        for code in ("BUS-401", "IRQ-501", "MEM-301", "PD-009"):
+            assert code in codes, f"{code} not available for {soc}"
+
+    def test_no_duplicate_rule_codes_for_rockchip(self):
+        # promoting the rules to common must not double-register for rockchip
+        from socc.rules.registry import RuleRegistry
+        from socc.rules.common import register_common_rules
+        from socc.rules.rockchip import register_rockchip_rules
+        reg = RuleRegistry()
+        register_common_rules(reg)
+        register_rockchip_rules(reg, "rk3588")
+        codes = [r.code for r in reg.get_rules_for_soc("rk3588")]
+        assert len(codes) == len(set(codes)), \
+            f"duplicate rule codes: {sorted(c for c in codes if codes.count(c) > 1)}"
+
+
+class TestQEMUCodegen:
+    """render_qemu_machine_c must emit real GIC/UART code, no TODO stubs."""
+
+    def _spec(self):
+        from socc.qemu import QEMUMachineSpec
+        return QEMUMachineSpec(
+            soc_name="rk3588", cpu_model="cortex-a76", num_cores=8,
+            ram_base=0x0, ram_size_mb=4096, gic_base=0xfe600000,
+            gic_dist_size=0x10000, uart_base=0xfeb50000, uart_irq=363,
+        )
+
+    def test_no_todo_stubs(self):
+        from socc.qemu import render_qemu_machine_c
+        out = render_qemu_machine_c(self._spec())
+        assert "TODO" not in out
+
+    def test_emits_gicv3_and_pl011(self):
+        from socc.qemu import render_qemu_machine_c
+        out = render_qemu_machine_c(self._spec())
+        assert "gicv3_class_name()" in out
+        assert "pl011_create(" in out
+        assert "rk3588_create_gic" in out
+
+    def test_creates_cpus_and_state_struct(self):
+        from socc.qemu import render_qemu_machine_c
+        out = render_qemu_machine_c(self._spec())
+        assert "ARMCPU      *cpus[8];" in out
+        assert "instance_size = sizeof(RK3588MachineState)" in out
+
+
+class TestParserByteArray:
+    """Byte arrays [..] previously crashed the tokenizer."""
+
+    def test_spaced_byte_array(self):
+        t = _parse_dts("/dts-v1/; / { mac = [00 11 22 ff]; };")
+        assert t["children"][0]["properties"]["mac"] == [0, 17, 34, 255]
+
+    def test_contiguous_byte_array(self):
+        t = _parse_dts("/dts-v1/; / { mac = [aabbcc]; };")
+        assert t["children"][0]["properties"]["mac"] == [0xaa, 0xbb, 0xcc]
+
+    def test_byte_array_does_not_raise(self):
+        # regression: '[' used to raise SyntaxError
+        _parse_dts('/dts-v1/; / { local-mac-address = [02 00 00 00 00 01]; };')
+
+
+class TestParserDeleteDirectives:
+    """/delete-node/ and /delete-property/ must be recognised, not mis-skipped."""
+
+    def test_delete_node_same_scope(self):
+        t = _parse_dts(
+            "/dts-v1/; / { eeprom@50 { compatible = \"x\"; }; "
+            "/delete-node/ eeprom@50; };"
+        )
+        node = t["children"][0]
+        assert [c["name"] for c in node["children"]] == []
+        assert node["deleted_nodes"] == ["eeprom@50"]
+
+    def test_delete_property_same_scope(self):
+        t = _parse_dts(
+            "/dts-v1/; / { status = \"okay\"; /delete-property/ status; };"
+        )
+        node = t["children"][0]
+        assert "status" not in node["properties"]
+        assert node["deleted_properties"] == ["status"]
+
+    def test_delete_directive_does_not_swallow_following_props(self):
+        t = _parse_dts(
+            "/dts-v1/; / { /delete-property/ foo; model = \"keepme\"; };"
+        )
+        node = t["children"][0]
+        assert node["properties"].get("model") == "keepme"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 10. v1.5.1 — PD-009 promoted to common; Allwinner IOMMU + Amlogic security rules
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPD009Common:
+    """PD-009 (power-domain-names mismatch) is now a common, vendor-agnostic rule."""
+
+    def test_pd009_lives_in_common(self):
+        from socc.rules.common.power_rules import PD009PowerDomainNamesMismatch
+        assert PD009PowerDomainNamesMismatch().code == "PD-009"
+
+    def test_pd009_not_in_rockchip_module(self):
+        import socc.rules.rockchip.power_rules as rp
+        assert not hasattr(rp, "PD009PowerDomainNamesMismatch")
+
+    def test_pd009_fires_on_mismatch(self):
+        from socc.rules.common.power_rules import PD009PowerDomainNamesMismatch
+        node = _irnode("gpu", props={
+            "power-domains": ["&pd", 0, "&pd", 1],   # 2 phandles
+            "power-domain-names": ["a"],             # 1 name
+        })
+        soc = SoC(name="x", power_tree=PowerTree(), clock_tree=ClockTree(),
+                  devices={"gpu": node}, device_supplies={}, device_clocks={})
+        v = PD009PowerDomainNamesMismatch().check(soc, CheckContext(soc_name="x"))
+        assert any(x.code == "PD-009" for x in v)
+
+    def test_pd009_no_fire_when_matched(self):
+        from socc.rules.common.power_rules import PD009PowerDomainNamesMismatch
+        node = _irnode("gpu", props={
+            "power-domains": ["&pd", 0],
+            "power-domain-names": ["a"],
+        })
+        soc = SoC(name="x", power_tree=PowerTree(), clock_tree=ClockTree(),
+                  devices={"gpu": node}, device_supplies={}, device_clocks={})
+        assert PD009PowerDomainNamesMismatch().check(soc, CheckContext(soc_name="x")) == []
+
+
+class TestAllwinnerIommu:
+    """AW-301: IOMMU master-ID collision (complements common DMA-001)."""
+
+    def _soc(self, ve_id):
+        dts = (
+            "/dts-v1/; / {"
+            " iommu: iommu@1 { compatible=\"allwinner,sun50i-h6-iommu\"; phandle=<1>; };"
+            " de: de@2 { compatible=\"allwinner,sun50i-h6-display-engine\"; iommus=<&iommu 0>; };"
+            f" ve: ve@3 {{ compatible=\"allwinner,sun50i-h6-video-engine\"; iommus=<&iommu {ve_id}>; }};"
+            "};"
+        )
+        from socc.parser.dts_mapper import dts_to_soc
+        return dts_to_soc(_parse_dts(dts), "sun50i-h6")
+
+    def test_collision_fires(self):
+        from socc.rules.allwinner.iommu_rules import AW301IommuMasterIdCollision
+        v = AW301IommuMasterIdCollision().check(self._soc(0), CheckContext(soc_name="sun50i-h6"))
+        assert any(x.code == "AW-301" for x in v)
+        assert v[0].severity == "error"
+
+    def test_unique_ids_no_fire(self):
+        from socc.rules.allwinner.iommu_rules import AW301IommuMasterIdCollision
+        assert AW301IommuMasterIdCollision().check(
+            self._soc(2), CheckContext(soc_name="sun50i-h6")) == []
+
+    def test_registered_for_allwinner(self):
+        from socc.rules.registry import RuleRegistry
+        from socc.rules.allwinner import register_allwinner_rules
+        reg = RuleRegistry()
+        register_allwinner_rules(reg, "sun50i-h6")
+        assert "AW-301" in {r.code for r in reg.get_rules_for_soc("sun50i-h6")}
+
+
+class TestAmlogicSecureMonitor:
+    """ML-301: eFuse present but Secure Monitor missing."""
+
+    def _soc(self, with_sm):
+        sm = ' sm { compatible="amlogic,meson-gxbb-sm"; };' if with_sm else ''
+        dts = (
+            "/dts-v1/; / {" + sm +
+            ' efuse@1 { compatible="amlogic,meson-gxbb-efuse"; };'
+            "};"
+        )
+        from socc.parser.dts_mapper import dts_to_soc
+        return dts_to_soc(_parse_dts(dts), "meson-gxbb")
+
+    def test_efuse_without_sm_fires(self):
+        from socc.rules.amlogic.sec_rules import ML301SecureMonitorMissing
+        v = ML301SecureMonitorMissing().check(self._soc(False), CheckContext(soc_name="meson-gxbb"))
+        assert any(x.code == "ML-301" for x in v)
+
+    def test_efuse_with_sm_no_fire(self):
+        from socc.rules.amlogic.sec_rules import ML301SecureMonitorMissing
+        assert ML301SecureMonitorMissing().check(
+            self._soc(True), CheckContext(soc_name="meson-gxbb")) == []
+
+    def test_registered_for_amlogic(self):
+        from socc.rules.registry import RuleRegistry
+        from socc.rules.amlogic import register_amlogic_rules
+        reg = RuleRegistry()
+        register_amlogic_rules(reg, "meson-g12b")
+        assert "ML-301" in {r.code for r in reg.get_rules_for_soc("meson-g12b")}

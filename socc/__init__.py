@@ -1,6 +1,6 @@
 """socc — SoC device-tree consistency checker."""
 
-__version__ = "1.4.5"
+__version__ = "1.5.0"
 
 from .model import (
     IRNode,

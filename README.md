@@ -421,6 +421,7 @@ is included at [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
 
 | Version | Highlights |
 |---------|-----------|
+| **v1.5.0** | NXP i.MX clock/power/GPIO rules (IMX-101/102/201/202/301/302); Allwinner IOMMU `AW-301` + Amlogic security `ML-301`; BUS/IRQ/MEM/PD-009 checks promoted to all vendors; byte-array + `/delete-*/` parsing; buildable QEMU GICv3/PL011 codegen; fix duplicate `PD-007`→`PD-009` |
 | **v1.4.5** | Interactive preprocessing prompt (TTY-only); `--no-preprocess`, `-y/--yes`, `--include DIR` |
 | **v1.4.4** | Preprocess bridge: unpreprocessed DTS detection + `--preprocess` flag (cpp/dtc) |
 | **v1.4.3** | Stabilization: JSON/SARIF output fixed (status → stderr); IRQ-C02 false positives eliminated (PPI 7 PMU, armv8-timer PPIs 13-15, GIC-v3 4-cell format); `__version__` sync |

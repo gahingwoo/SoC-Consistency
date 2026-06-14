@@ -5,6 +5,71 @@ Releases follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.5.0] — 2026-06-14
+
+### Added
+
+- **NXP i.MX rule coverage tripled.** New clock, power, and GPIO/pinmux rule
+  sets bring the i.MX family to parity with the other vendors:
+  - `IMX-101` CCM clock controller missing
+  - `IMX-102` 24 MHz reference oscillator missing
+  - `IMX-201` companion PMIC (PCA9450 / BD718x7) missing
+  - `IMX-202` VDD_ARM / VDD_SOC core rail missing
+  - `IMX-301` IOMUXC pin controller missing
+  - `IMX-302` GPIO pin index out of range (banks are 32 lines wide)
+
+- **Bus / interrupt / memory checks now apply to every vendor.** The
+  constraint-driven `BUS-4xx`, `IRQ-5xx`, and `MEM-3xx` rules — previously
+  registered only for Rockchip — moved to the **common** rule set, so
+  Allwinner, Amlogic, Qualcomm, NXP, and any future vendor inherit them with
+  no duplication.
+
+- **`PD-009` (power-domains / power-domain-names mismatch) promoted to common.**
+  The genpd list-length check is vendor-agnostic; it now runs for every SoC
+  instead of Rockchip only.
+
+- **Allwinner IOMMU rule `AW-301`** — flags two masters bound to the same
+  `<&iommu ID>` cell (a copy-paste collision that silently shares one
+  translation context and defeats IOMMU isolation).  Complements the common
+  `DMA-001` presence check rather than duplicating it.
+
+- **Amlogic security rule `ML-301`** — flags an eFuse (or other SMC-backed
+  peripheral) present without an `amlogic,meson-*-sm` Secure Monitor node, which
+  leaves the driver with no firmware interface to probe against.
+
+- **Device-tree byte arrays are now parsed.** Property values written as raw
+  byte strings (`mac-address = [00 11 22 ff]`, `local-mac-address = [aabbcc]`)
+  previously raised `SyntaxError`; the tokenizer now understands `[ … ]` and
+  decodes them to integer lists.
+
+- **`/delete-node/` and `/delete-property/` directives are recognised.** The
+  parser records them (`deleted_nodes` / `deleted_properties`) and applies
+  same-scope deletes instead of silently mis-skipping the following tokens.
+
+- **`socc generate qemu` emits a buildable machine.** The generated C machine
+  file now creates the CPUs, instantiates a GICv3 (with per-CPU IRQ/FIQ and
+  timer-PPI wiring), and a PL011 UART routed to its GIC SPI line — replacing
+  the previous `/* TODO */` stubs.
+
+### Fixed
+
+- **Duplicate rule code `PD-007`.** Two unrelated rules shared the code:
+  the common *IO-before-Core sequencing* check and a Rockchip
+  *power-domain-names count mismatch* check. The latter is renamed to
+  **`PD-009`** (and moved to the common rule set, see above) so each code maps
+  to exactly one rule (fixes ambiguous `socc explain PD-007` and duplicated
+  findings on Rockchip targets).
+
+### Changed
+
+- **Shared DMA-master / IOMMU classifiers.** `iommu_rules` and `sec_rules`
+  previously carried near-duplicate, drifting copies of the DMA-master and
+  IOMMU-controller token sets. They now share
+  `socc/rules/common/_classifiers.py`, so a newly recognised DMA-capable IP
+  block is picked up by both the isolation and secure-memory rules at once.
+
+---
+
 ## [1.4.5] — 2026-05-20
 
 ### Added
