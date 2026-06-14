@@ -24,6 +24,7 @@ class TokenType(Enum):
     LABEL = "LABEL"  # label:
     NODE_NAME = "NODE_NAME"  # node_name or node@addr
     SLASH = "SLASH"  # /
+    BYTESTRING = "BYTESTRING"  # [00 11 ff] raw byte array
     EOF = "EOF"
 
 
@@ -215,7 +216,17 @@ class DTSTokenizer:
             elif char == '/':
                 self._advance()
                 self.tokens.append(Token(TokenType.SLASH, '/', line, col))
-            
+
+            # byte string  [ 00 11 ff ]  — captured raw, parsed later
+            elif char == '[':
+                self._advance()  # [
+                raw = []
+                while self._peek() is not None and self._peek() != ']':
+                    raw.append(self._advance() or '')
+                if self._peek() == ']':
+                    self._advance()  # ]
+                self.tokens.append(Token(TokenType.BYTESTRING, ''.join(raw), line, col))
+
             # identifier (node name / property name)
             elif char and (char.isalpha() or char in '_#'):
                 ident = self._read_identifier()
@@ -359,6 +370,11 @@ class DTSParser:
             if self._current().type == TokenType.EOF:
                 raise SyntaxError("Unclosed node")
             
+            # /delete-node/ and /delete-property/ directives
+            if self._current().type == TokenType.KEYWORD:
+                self._parse_delete_directive(node)
+                continue
+
             # label
             if self._current().type == TokenType.LABEL:
                 label = self._current().value
@@ -403,6 +419,49 @@ class DTSParser:
             else:
                 self._advance()
     
+    def _parse_delete_directive(self, node: Dict[str, Any]) -> None:
+        """Handle ``/delete-node/`` and ``/delete-property/`` inside a node body.
+
+        The directive is recorded on the node (``deleted_nodes`` /
+        ``deleted_properties``) and, when the target was defined earlier in the
+        *same* scope, it is removed immediately.  Cross-scope deletes (the
+        ``&label { /delete-node/ x; }`` override form) are left for the overlay
+        merger, which has the label table needed to resolve them.
+        """
+        keyword = self._current().value  # e.g. "/delete-node" or "/delete-property"
+        self._advance()
+        # the trailing slash of "/delete-node/" tokenises separately
+        if self._current().type == TokenType.SLASH:
+            self._advance()
+
+        target = None
+        if self._current().type in (
+            TokenType.NODE_NAME, TokenType.PHANDLE, TokenType.LABEL
+        ):
+            target = self._current().value
+            self._advance()
+
+        # consume any remaining tokens up to the terminating semicolon
+        while self._current().type not in (
+            TokenType.SEMICOLON, TokenType.NODE_END, TokenType.EOF
+        ):
+            self._advance()
+        if self._current().type == TokenType.SEMICOLON:
+            self._advance()
+
+        if target is None:
+            return
+
+        if "property" in keyword:
+            node["properties"].pop(target, None)
+            node.setdefault("deleted_properties", []).append(target)
+        else:
+            bare = target.lstrip("&")
+            node["children"] = [
+                c for c in node["children"] if c.get("name") != bare
+            ]
+            node.setdefault("deleted_nodes", []).append(target)
+
     def _parse_property_value(self) -> Any:
         """Parse a property value up to the next semicolon."""
         values = []
@@ -414,6 +473,17 @@ class DTSParser:
             
             if self._current().type == TokenType.STRING:
                 values.append(self._current().value)
+                self._advance()
+            elif self._current().type == TokenType.BYTESTRING:
+                # raw byte array [00 11 ff] -> list of ints
+                hexstr = ''.join(self._current().value.split())
+                byts = []
+                for i in range(0, len(hexstr) - 1, 2):
+                    try:
+                        byts.append(int(hexstr[i:i + 2], 16))
+                    except ValueError:
+                        pass
+                values.append(byts)
                 self._advance()
             elif self._current().type == TokenType.NUMBER:
                 values.append(int(self._current().value, 0))
